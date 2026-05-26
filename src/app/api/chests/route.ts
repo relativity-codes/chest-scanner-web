@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
+import { canonicalizePlayerName } from "@/lib/canonicalization";
 
 // GET: Fetch chest scans
 export async function GET(req: NextRequest) {
@@ -33,10 +34,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const canonicalPlayer = await canonicalizePlayerName(fromPlayer);
+
     const chest = await db.chest.create({
       data: {
         chestName,
-        fromPlayer,
+        fromPlayer: canonicalPlayer,
         source,
         time: new Date(time),
         gameDay,
