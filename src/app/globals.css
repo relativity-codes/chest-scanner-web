@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  --background: #030307;
+  --foreground: #f8fafc;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+/* Glassmorphism panel styles */
+.glass-panel {
+  background: rgba(12, 13, 24, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(223, 178, 57, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+.glass-panel-glow {
+  background: rgba(16, 18, 35, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(223, 178, 57, 0.2);
+  box-shadow: 0 0 25px 0 rgba(223, 178, 57, 0.08);
+}
+
+/* Glowing text matching game elements */
+.text-gold {
+  color: #dfb239;
+  text-shadow: 0 0 10px rgba(223, 178, 57, 0.35);
+}
+
+.text-gold-bright {
+  color: #f7d070;
+  text-shadow: 0 0 15px rgba(247, 208, 112, 0.5);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 11, 20, 0.6);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(223, 178, 57, 0.25);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(223, 178, 57, 0.45);
+}
+
+/* Custom card entrance transition */
+@keyframes slideInGlow {
+  0% {
+    opacity: 0;
+    transform: translateY(-15px) scale(0.97);
+    box-shadow: 0 0 0px 0 rgba(223, 178, 57, 0);
+  }
+  30% {
+    box-shadow: 0 0 20px 2px rgba(223, 178, 57, 0.35);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  }
+}
+
+.animate-scan-card {
+  animation: slideInGlow 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

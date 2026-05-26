@@ -1,0 +1,63 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
+// GET: Fetch unknown players for moderation on the web dashboard
+export async function GET() {
+  try {
+    const list = await db.unknownPlayer.findMany({
+      orderBy: { encountered: "desc" },
+    });
+    return NextResponse.json(list);
+  } catch (error) {
+    console.error("Failed to fetch unknown players:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch unknown players" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST: Android client reports a newly encountered unknown name
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { ocrName } = body;
+    if (!ocrName || typeof ocrName !== "string") {
+      return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+    }
+
+    const record = await db.unknownPlayer.upsert({
+      where: { ocrName },
+      update: {},
+      create: { ocrName },
+    });
+
+    return NextResponse.json(record);
+  } catch (error) {
+    console.error("Failed to record unknown player:", error);
+    return NextResponse.json({ error: "Failed to record" }, { status: 500 });
+  }
+}
+
+// DELETE: Deletes from unknown log when whitelisted
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const ocrName = searchParams.get("ocrName");
+    if (!ocrName) {
+      return NextResponse.json(
+        { error: "Name parameter required" },
+        { status: 400 }
+      );
+    }
+
+    await db.unknownPlayer.deleteMany({
+      where: { ocrName },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete unknown player:", error);
+    return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
+  }
+}

@@ -1,0 +1,44 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Scanned Chest Entries
+model Chest {
+  id            String   @id @default(uuid())
+  chestName     String
+  fromPlayer    String
+  source        String
+  time          DateTime
+  gameDay       String
+  originalTimer String
+  createdAt     DateTime @default(now())
+}
+
+// Allowed Clan Members Whitelist (Dynamic)
+model Player {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+// OCR Name Correction Mapping (Dynamic)
+model PlayerFix {
+  id          String   @id @default(uuid())
+  ocrName     String   @unique
+  correctedTo String
+  createdAt   DateTime @default(now())
+}
+
+// Auto-Discovered Unknown Names awaiting moderation (Dynamic)
+model UnknownPlayer {
+  id          String   @id @default(uuid())
+  ocrName     String   @unique
+  encountered DateTime @default(now())
+}
