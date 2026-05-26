@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useTranslations } from "next-intl";
 import {
   Activity,
   Users,
@@ -42,6 +43,7 @@ interface UnknownPlayer {
 }
 
 export default function Dashboard() {
+  const t = useTranslations('Dashboard');
   const [chests, setChests] = useState<Chest[]>([]);
   const [players, setPlayers] = useState<string[]>([]);
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
@@ -369,8 +371,8 @@ export default function Dashboard() {
             <Flame className="w-6 h-6 text-[#030307] stroke-[2.5]" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold">ELF CLAN CHEST RADAR</h1>
-            <p className="text-xs text-slate-400 font-medium">Real-Time Mobile OCR Scanner & Analysis Dashboard</p>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold">{t('title')}</h1>
+            <p className="text-xs text-slate-400 font-medium">{t('subtitle')}</p>
           </div>
         </div>
 
