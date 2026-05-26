@@ -26,20 +26,27 @@ export async function POST(req: NextRequest) {
 
       const canonicalPlayer = await canonicalizePlayerName(fromPlayer);
 
-      const chest = await db.chest.create({
-        data: {
-          chestName,
-          fromPlayer: canonicalPlayer,
-          source,
-          time: new Date(time),
-          gameDay,
-          originalTimer: originalTimer || "",
-        },
-      });
+      try {
+        const chest = await db.chest.create({
+          data: {
+            chestName,
+            fromPlayer: canonicalPlayer,
+            source,
+            time: new Date(time),
+            gameDay,
+            originalTimer: originalTimer || "",
+          },
+        });
 
-      createdChests.push(chest);
-      // Emit event for Server-Sent Events subscribers
-      eventEmitter.emit(EVENTS.CHEST_SCANNED, chest);
+        createdChests.push(chest);
+        // Emit event for Server-Sent Events subscribers
+        eventEmitter.emit(EVENTS.CHEST_SCANNED, chest);
+      } catch (err: any) {
+        // If it's a unique constraint violation (P2002), just skip it as it's already synced
+        if (err.code !== 'P2002') {
+          console.error("Failed to insert chest in batch:", err);
+        }
+      }
     }
 
     return NextResponse.json({
