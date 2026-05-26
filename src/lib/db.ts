@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import path from "path";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+import * as fs from "fs";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -8,8 +9,20 @@ const globalForPrisma = globalThis as unknown as {
 
 let prismaInstance: PrismaClient;
 
-const dbPath = path.join(process.cwd(), "dev.db");
-const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
+
+let sslConfig = undefined;
+try {
+  const ca = fs.readFileSync('./.postgresql/root.crt').toString();
+  sslConfig = { ca };
+} catch {
+  console.warn('[DB] .postgresql/root.crt not found, proceeding without custom CA.');
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: sslConfig,
+});
+const adapter = new PrismaPg(pool);
 
 if (process.env.NODE_ENV === "production") {
   prismaInstance = new PrismaClient({ adapter });

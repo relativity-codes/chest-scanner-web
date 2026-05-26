@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { 
-  Activity, 
-  Users, 
-  ShieldAlert, 
-  Sparkles, 
-  Plus, 
-  Trash2, 
-  Check, 
+import {
+  Activity,
+  Users,
+  ShieldAlert,
+  Sparkles,
+  Plus,
+  Trash2,
+  Check,
   Database,
   ArrowRight,
   Wifi,
@@ -46,25 +46,21 @@ export default function Dashboard() {
   const [players, setPlayers] = useState<string[]>([]);
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
-  
+
   const [activeTab, setActiveTab] = useState<"live" | "contributions" | "whitelist" | "corrections">("live");
   const [isConnected, setIsConnected] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+
   // Roster inputs
   const [newPlayerName, setNewPlayerName] = useState("");
   const [playerSearchQuery, setPlayerSearchQuery] = useState("");
-  
+
   // Correction inputs
   const [ocrErrorInput, setOcrErrorInput] = useState("");
   const [ocrCorrectToInput, setOcrCorrectToInput] = useState("");
-  
+
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Load Initial Data
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
 
   const fetchInitialData = async () => {
     try {
@@ -89,10 +85,16 @@ export default function Dashboard() {
     }
   };
 
+
+  // Load Initial Data
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
   // Real-Time Player Contributions Aggregation
   const getPlayerContributions = () => {
     const contributions: Record<string, { total: number; legendary: number; epic: number; rare: number; common: number }> = {};
-    
+
     // Initialize whitelisted players with 0 stats
     players.forEach(p => {
       contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0 };
@@ -132,14 +134,14 @@ export default function Dashboard() {
       const ctx = audioContextRef.current;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.type = "sine";
       osc.frequency.setValueAtTime(880, ctx.currentTime); // high pure A note
       osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12); // smooth sweep
-      
+
       gain.gain.setValueAtTime(0.04, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start();
@@ -225,12 +227,12 @@ export default function Dashboard() {
 
       if (addRes.ok) {
         setPlayers((prev) => [...prev, ocrName].sort());
-        
+
         // 2. Delete from Unknown logs
         await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(ocrName)}`, {
           method: "DELETE",
         });
-        
+
         setUnknownPlayers((prev) => prev.filter((u) => u.ocrName !== ocrName));
       }
     } catch (e) {
@@ -279,7 +281,7 @@ export default function Dashboard() {
       });
       if (res.ok) {
         const newFix = await res.json();
-        setFixes((prev) => [...prev.filter((f) => f.ocrName !== errorName), newFix].sort((a,b) => a.ocrName.localeCompare(b.ocrName)));
+        setFixes((prev) => [...prev.filter((f) => f.ocrName !== errorName), newFix].sort((a, b) => a.ocrName.localeCompare(b.ocrName)));
         setOcrErrorInput("");
         setOcrCorrectToInput("");
       }
@@ -321,10 +323,10 @@ export default function Dashboard() {
 
   // STATISTICS CALCULATIONS
   const totalChests = chests.length;
-  
+
   // Calculate active scanners (distinct players in scanned list)
   const activeScanners = Array.from(new Set(chests.map((c) => c.fromPlayer))).length;
-  
+
   // Daily Average Calculator
   const getDailyAverage = () => {
     if (chests.length === 0) return 0;
@@ -335,7 +337,7 @@ export default function Dashboard() {
   const dailyAverage = getDailyAverage();
 
   // Whitelist filtering
-  const filteredPlayers = players.filter((p) => 
+  const filteredPlayers = players.filter((p) =>
     p.toLowerCase().includes(playerSearchQuery.toLowerCase())
   );
 
@@ -374,23 +376,21 @@ export default function Dashboard() {
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
           {/* Audio toggle button */}
-          <button 
+          <button
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className={`px-3 py-1.5 rounded-lg border font-medium transition-all ${
-              soundEnabled 
-                ? "bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-md shadow-amber-500/5 hover:bg-amber-500/20" 
-                : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-800"
-            }`}
+            className={`px-3 py-1.5 rounded-lg border font-medium transition-all ${soundEnabled
+              ? "bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-md shadow-amber-500/5 hover:bg-amber-500/20"
+              : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-800"
+              }`}
           >
             Sound: {soundEnabled ? "ON" : "OFF"}
           </button>
 
           {/* Connection badge */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
-            isConnected 
-              ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-400" 
-              : "bg-rose-500/10 border-rose-500/35 text-rose-400"
-          }`}>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${isConnected
+            ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-400"
+            : "bg-rose-500/10 border-rose-500/35 text-rose-400"
+            }`}>
             {isConnected ? (
               <>
                 <Wifi className="w-4 h-4 animate-pulse" />
@@ -416,7 +416,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
             <Database className="w-3.5 h-3.5 text-amber-500/70" />
-            <span>SQLite Database Active</span>
+            <span>CockroachDB Active</span>
           </div>
         </div>
 
@@ -463,31 +463,28 @@ export default function Dashboard() {
       <div className="flex border-b border-slate-800/80 mb-6 gap-2">
         <button
           onClick={() => setActiveTab("live")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${
-            activeTab === "live"
-              ? "border-amber-500 text-gold font-bold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
+          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "live"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
         >
           Live Scanner Feed
         </button>
         <button
           onClick={() => setActiveTab("contributions")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${
-            activeTab === "contributions"
-              ? "border-amber-500 text-gold font-bold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
+          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "contributions"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
         >
           Player Contributions
         </button>
         <button
           onClick={() => setActiveTab("whitelist")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 flex items-center gap-1.5 ${
-            activeTab === "whitelist"
-              ? "border-amber-500 text-gold font-bold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
+          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 flex items-center gap-1.5 ${activeTab === "whitelist"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
         >
           Clan Whitelist
           {unknownPlayers.length > 0 && (
@@ -498,18 +495,17 @@ export default function Dashboard() {
         </button>
         <button
           onClick={() => setActiveTab("corrections")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${
-            activeTab === "corrections"
-              ? "border-amber-500 text-gold font-bold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
+          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "corrections"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
         >
           OCR Name Corrections
         </button>
       </div>
 
       {/* SECTION CONTENTS */}
-      
+
       {/* 1. TAB: LIVE SCANNER FEED */}
       {activeTab === "live" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -534,15 +530,14 @@ export default function Dashboard() {
                 chests.map((chest, index) => {
                   const style = getChestColor(chest.chestName);
                   return (
-                    <div 
-                      key={chest.id} 
-                      style={{ 
-                        backgroundColor: style.bg, 
-                        borderColor: style.border 
+                    <div
+                      key={chest.id}
+                      style={{
+                        backgroundColor: style.bg,
+                        borderColor: style.border
                       }}
-                      className={`border p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                        index === 0 ? "animate-scan-card" : ""
-                      }`}
+                      className={`border p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 ${index === 0 ? "animate-scan-card" : ""
+                        }`}
                     >
                       {/* Left Block */}
                       <div className="flex flex-col gap-1">
@@ -587,7 +582,7 @@ export default function Dashboard() {
             {/* Visual SVG Distribution Charts */}
             <div className="glass-panel rounded-2xl p-5">
               <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-4 uppercase">CHEST QUALITY SHARE</h2>
-              
+
               {chests.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-xs text-slate-500">
                   Waiting for database records to map analytics...
@@ -603,8 +598,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(rarityStats.legendary / chests.length) * 100}%` }} 
+                      <div
+                        style={{ width: `${(rarityStats.legendary / chests.length) * 100}%` }}
                         className="bg-gradient-to-r from-amber-500 to-amber-300 h-full rounded-full"
                       />
                     </div>
@@ -619,8 +614,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(rarityStats.epic / chests.length) * 100}%` }} 
+                      <div
+                        style={{ width: `${(rarityStats.epic / chests.length) * 100}%` }}
                         className="bg-gradient-to-r from-purple-500 to-purple-400 h-full rounded-full"
                       />
                     </div>
@@ -635,8 +630,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(rarityStats.rare / chests.length) * 100}%` }} 
+                      <div
+                        style={{ width: `${(rarityStats.rare / chests.length) * 100}%` }}
                         className="bg-gradient-to-r from-blue-500 to-blue-400 h-full rounded-full"
                       />
                     </div>
@@ -651,8 +646,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(rarityStats.heroic / chests.length) * 100}%` }} 
+                      <div
+                        style={{ width: `${(rarityStats.heroic / chests.length) * 100}%` }}
                         className="bg-gradient-to-r from-cyan-500 to-cyan-400 h-full rounded-full"
                       />
                     </div>
@@ -667,8 +662,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(rarityStats.common / chests.length) * 100}%` }} 
+                      <div
+                        style={{ width: `${(rarityStats.common / chests.length) * 100}%` }}
                         className="bg-gradient-to-r from-green-500 to-green-400 h-full rounded-full"
                       />
                     </div>
@@ -697,12 +692,11 @@ export default function Dashboard() {
                     .map(([name, count], rank) => (
                       <div key={name} className="flex items-center justify-between border-b border-slate-800/40 pb-2">
                         <div className="flex items-center gap-2.5">
-                          <span className={`w-5 h-5 rounded-md flex items-center justify-center font-bold font-mono text-[10px] ${
-                            rank === 0 ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : 
-                            rank === 1 ? "bg-slate-400/20 text-slate-300 border border-slate-400/30" : 
-                            rank === 2 ? "bg-amber-700/20 text-amber-600 border border-amber-700/30" : 
-                            "bg-slate-950 text-slate-400 border border-slate-850"
-                          }`}>
+                          <span className={`w-5 h-5 rounded-md flex items-center justify-center font-bold font-mono text-[10px] ${rank === 0 ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                            rank === 1 ? "bg-slate-400/20 text-slate-300 border border-slate-400/30" :
+                              rank === 2 ? "bg-amber-700/20 text-amber-600 border border-amber-700/30" :
+                                "bg-slate-950 text-slate-400 border border-slate-850"
+                            }`}>
                             {rank + 1}
                           </span>
                           <span className="font-semibold text-slate-200">{name}</span>
@@ -724,7 +718,7 @@ export default function Dashboard() {
         const topContributorCount = contributionsList[0]?.total || 0;
         const totalScanChests = chests.length;
         const averageChestsPerPlayer = players.length > 0 ? (totalScanChests / players.length).toFixed(1) : "0.0";
-        
+
         return (
           <div className="flex flex-col gap-6">
             {/* Highlights Cards */}
@@ -775,7 +769,7 @@ export default function Dashboard() {
                   <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
                   <p className="text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
                 </div>
-                
+
                 {/* Search */}
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -822,9 +816,9 @@ export default function Dashboard() {
                           statusText = "Contributor";
                           statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
                         }
-                        
+
                         return (
-                          <tr 
+                          <tr
                             key={item.player}
                             className="border-b border-slate-800/40 hover:bg-slate-900/20 transition-all"
                           >
@@ -923,7 +917,7 @@ export default function Dashboard() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                   {filteredPlayers.map((player) => (
-                    <div 
+                    <div
                       key={player}
                       className="flex items-center justify-between p-3 bg-slate-950/65 border border-slate-900 rounded-xl hover:border-slate-800 hover:bg-slate-950/90 transition-all group"
                     >
@@ -971,7 +965,7 @@ export default function Dashboard() {
                           Encountered: {new Date(unPlayer.encountered).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      
+
                       <button
                         onClick={() => handleApproveUnknownPlayer(unPlayer.ocrName)}
                         className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-bold transition-all"
@@ -1029,7 +1023,7 @@ export default function Dashboard() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
                   {fixes.map((fix) => (
-                    <div 
+                    <div
                       key={fix.id}
                       className="flex items-center justify-between p-3 bg-slate-950/65 border border-slate-900 rounded-xl hover:border-slate-800 hover:bg-slate-950/90 transition-all group"
                     >
@@ -1038,7 +1032,7 @@ export default function Dashboard() {
                         <ArrowRight className="w-3.5 h-3.5 text-amber-500/50 flex-shrink-0" />
                         <span className="font-bold text-slate-250 truncate">{fix.correctedTo}</span>
                       </div>
-                      
+
                       <button
                         onClick={() => handleDeleteFix(fix.ocrName)}
                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all flex-shrink-0"
@@ -1059,7 +1053,7 @@ export default function Dashboard() {
               <BookOpen className="w-5 h-5 text-amber-500" />
               <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">ADD CORRECTION</h2>
             </div>
-            
+
             <div className="flex flex-col gap-4 text-xs mt-2">
               <div className="flex flex-col gap-1.5">
                 <label className="font-bold text-slate-400">OCR MISPELLING / ERROR:</label>

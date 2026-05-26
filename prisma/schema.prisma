@@ -6,12 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "cockroachdb"
 }
 
 // Scanned Chest Entries
 model Chest {
-  id            String   @id @default(uuid())
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   chestName     String
   fromPlayer    String
   source        String
@@ -23,14 +23,14 @@ model Chest {
 
 // Allowed Clan Members Whitelist (Dynamic)
 model Player {
-  id        String   @id @default(uuid())
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String   @unique
   createdAt DateTime @default(now())
 }
 
 // OCR Name Correction Mapping (Dynamic)
 model PlayerFix {
-  id          String   @id @default(uuid())
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ocrName     String   @unique
   correctedTo String
   createdAt   DateTime @default(now())
@@ -38,7 +38,7 @@ model PlayerFix {
 
 // Auto-Discovered Unknown Names awaiting moderation (Dynamic)
 model UnknownPlayer {
-  id          String   @id @default(uuid())
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ocrName     String   @unique
   encountered DateTime @default(now())
 }
