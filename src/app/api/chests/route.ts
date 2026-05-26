@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
 import { canonicalizePlayerName } from "@/lib/canonicalization";
+import { sendDiscordAlert } from "@/lib/discord";
 
 // GET: Fetch chest scans
 export async function GET(req: NextRequest) {
@@ -15,8 +16,9 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(chests);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to fetch chests:", error);
+    await sendDiscordAlert(`GET /api/chests Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to fetch" }, { status: 500 });
   }
 }
@@ -51,8 +53,9 @@ export async function POST(req: NextRequest) {
     eventEmitter.emit(EVENTS.CHEST_SCANNED, chest);
 
     return NextResponse.json(chest);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to save chest scan:", error);
+    await sendDiscordAlert(`POST /api/chests Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to save chest scan" },
       { status: 500 }

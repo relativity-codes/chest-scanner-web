@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { sendDiscordAlert } from "@/lib/discord";
 
 // GET: Return all raw PlayerFix mapping rows
 export async function GET() {
@@ -8,8 +10,9 @@ export async function GET() {
       orderBy: { ocrName: "asc" },
     });
     return NextResponse.json(list);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to fetch player fixes:", error);
+    await sendDiscordAlert(`GET /api/player-fixes Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to fetch player fixes" },
       { status: 500 }
@@ -36,8 +39,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(record);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to add player fix:", error);
+    await sendDiscordAlert(`POST /api/player-fixes Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to save player fix" },
       { status: 500 }
@@ -62,8 +66,9 @@ export async function DELETE(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to delete player fix:", error);
+    await sendDiscordAlert(`DELETE /api/player-fixes Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
   }
 }

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { sendDiscordAlert } from "@/lib/discord";
 
 // GET: Return whitelisted players & corrections map
 export async function GET() {
@@ -20,8 +21,9 @@ export async function GET() {
     }
 
     return NextResponse.json({ players, fixes });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to fetch whitelist:", error);
+    await sendDiscordAlert(`GET /api/whitelist Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to fetch whitelist" },
       { status: 500 }
@@ -45,8 +47,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(player);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to whitelist player:", error);
+    await sendDiscordAlert(`POST /api/whitelist Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to whitelist" }, { status: 500 });
   }
 }
@@ -65,8 +68,9 @@ export async function DELETE(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to remove player:", error);
+    await sendDiscordAlert(`DELETE /api/whitelist Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to remove" }, { status: 500 });
   }
 }

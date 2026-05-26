@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
 import { canonicalizePlayerName } from "@/lib/canonicalization";
+import { sendDiscordAlert } from "@/lib/discord";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +47,7 @@ export async function POST(req: NextRequest) {
         // If it's a unique constraint violation (P2002), just skip it as it's already synced
         if (err.code !== 'P2002') {
           console.error("Failed to insert chest in batch:", err);
+          await sendDiscordAlert(`Prisma Insert Error: ${err.message || String(err)}`);
         }
       }
     }
@@ -53,8 +56,9 @@ export async function POST(req: NextRequest) {
       success: true,
       count: createdChests.length,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to batch save chest scans:", error);
+    await sendDiscordAlert(`Batch Save Fatal Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to save chest scans" },
       { status: 500 }

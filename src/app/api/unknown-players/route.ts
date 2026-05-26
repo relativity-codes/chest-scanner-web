@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { sendDiscordAlert } from "@/lib/discord";
 
 // GET: Fetch unknown players for moderation on the web dashboard
 export async function GET() {
@@ -8,8 +10,9 @@ export async function GET() {
       orderBy: { encountered: "desc" },
     });
     return NextResponse.json(list);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to fetch unknown players:", error);
+    await sendDiscordAlert(`GET /api/unknown-players Error: ${error.message || String(error)}`);
     return NextResponse.json(
       { error: "Failed to fetch unknown players" },
       { status: 500 }
@@ -33,8 +36,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(record);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to record unknown player:", error);
+    await sendDiscordAlert(`POST /api/unknown-players Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to record" }, { status: 500 });
   }
 }
@@ -56,8 +60,9 @@ export async function DELETE(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to delete unknown player:", error);
+    await sendDiscordAlert(`DELETE /api/unknown-players Error: ${error.message || String(error)}`);
     return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
   }
 }
