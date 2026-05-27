@@ -19,6 +19,8 @@ model Chest {
   gameDay       String
   originalTimer String
   createdAt     DateTime @default(now())
+
+  @@unique([chestName, fromPlayer, source, time, gameDay])
 }
 
 // Allowed Clan Members Whitelist (Dynamic)
