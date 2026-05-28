@@ -20,7 +20,9 @@ import {
   Calendar,
   Download,
   Target,
-  X
+  X,
+  MessageCircle,
+  MessageSquare
 } from "lucide-react";
 
 interface Chest {
@@ -475,6 +477,28 @@ export default function Dashboard() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
+          {/* WhatsApp Invite link */}
+          <a
+            href="https://chat.whatsapp.com/D7E8YCtYPOjB2j1vN4ZVDN"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 shadow-md shadow-emerald-500/5 transition-all text-xs"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>WhatsApp Group</span>
+          </a>
+
+          {/* Discord Invite link */}
+          <a
+            href="https://discord.gg/7994zN5X"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-medium bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 shadow-md shadow-indigo-500/5 transition-all text-xs"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Discord</span>
+          </a>
+
           {/* Audio toggle button */}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
