@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import {
   Activity,
   Users,
   ShieldAlert,
-  Sparkles,
   Plus,
   Trash2,
   Check,
@@ -16,7 +15,12 @@ import {
   WifiOff,
   Flame,
   Search,
-  BookOpen
+  BookOpen,
+  Filter,
+  Calendar,
+  Download,
+  Target,
+  X
 } from "lucide-react";
 
 interface Chest {
@@ -28,6 +32,16 @@ interface Chest {
   gameDay: string;
   originalTimer: string;
   createdAt: string;
+}
+
+function formatUTC10Time(dateInput: string | Date): string {
+  const date = new Date(dateInput);
+  const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
+  const d = new Date(utc10Time);
+  const hours = String(d.getUTCHours()).padStart(2, '0');
+  const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
 }
 
 interface PlayerFix {
@@ -42,10 +56,62 @@ interface UnknownPlayer {
   encountered: string;
 }
 
+interface PlayerContribution {
+  player: string;
+  total: number;
+  legendary: number;
+  epic: number;
+  rare: number;
+  common: number;
+}
+
 export default function Dashboard() {
   const t = useTranslations('Dashboard');
-  const [chests, setChests] = useState<Chest[]>([]);
+  const [rawChests, setRawChests] = useState<Chest[]>([]);
   const [players, setPlayers] = useState<string[]>([]);
+
+  // Premium Analytics & Filtering States
+  const [filterSource, setFilterSource] = useState<string>("all");
+  const [filterDateRange, setFilterDateRange] = useState<string>("all");
+  const [weeklyTarget, setWeeklyTarget] = useState<number>(20);
+  const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<string | null>(null);
+
+  // Helper to calculate game day in UTC+10
+  const getUTC10GameDayStr = (date: Date): string => {
+    const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
+    const d = new Date(utc10Time);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    return `chests_${yyyy}-${mm}-${dd}`;
+  };
+
+  // Compute active filtered chests
+  const getFilteredChests = () => {
+    return rawChests.filter(chest => {
+      if (filterSource !== "all" && chest.source !== filterSource) {
+        return false;
+      }
+      if (filterDateRange !== "all") {
+        const chestDate = new Date(chest.time);
+        const now = new Date();
+        const diffTime = Math.abs(now.getTime() - chestDate.getTime());
+        if (filterDateRange === "today") {
+          const todayGameDayStr = getUTC10GameDayStr(now);
+          if (chest.gameDay !== todayGameDayStr) return false;
+        } else if (filterDateRange === "week") {
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays > 7) return false;
+        } else if (filterDateRange === "month") {
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays > 30) return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  const chests = getFilteredChests();
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
@@ -78,7 +144,7 @@ export default function Dashboard() {
       const fixesData = await fixesRes.json();
       const unknownsData = await unknownsRes.json();
 
-      setChests(Array.isArray(chestsData) ? chestsData : []);
+      setRawChests(Array.isArray(chestsData) ? chestsData : []);
       setPlayers(Array.isArray(whitelistData.players) ? whitelistData.players : []);
       setFixes(Array.isArray(fixesData) ? fixesData : []);
       setUnknownPlayers(Array.isArray(unknownsData) ? unknownsData : []);
@@ -90,6 +156,7 @@ export default function Dashboard() {
 
   // Load Initial Data
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchInitialData();
   }, []);
 
@@ -126,12 +193,44 @@ export default function Dashboard() {
       .sort((a, b) => b.total - a.total);
   };
 
+  const handleExportCSV = (contributionsList: PlayerContribution[]) => {
+    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Total Drops", "Weekly Target Status"];
+    const rows = contributionsList.map((item, idx) => {
+      const statusText = item.total >= weeklyTarget ? "Target Met" : `${item.total}/${weeklyTarget}`;
+      return [
+        idx + 1,
+        `"${item.player.replace(/"/g, '""')}"`,
+        item.legendary,
+        item.epic,
+        item.rare,
+        item.common,
+        item.total,
+        `"${statusText}"`
+      ];
+    });
+
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `elf_clan_chest_contributions_${filterDateRange}_${filterSource}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
   // Play subtle synth ping when a chest scans in real-time
-  const playClaimSound = () => {
-    if (!soundEnabled) return;
+  const playClaimSound = useCallback(() => {
+    if (!soundEnabledRef.current) return;
     try {
       if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       }
       const ctx = audioContextRef.current;
       const osc = ctx.createOscillator();
@@ -151,11 +250,11 @@ export default function Dashboard() {
     } catch (error) {
       console.warn("Audio Context blocked:", error);
     }
-  };
+  }, []);
 
   // Setup Server-Sent Events (SSE) Live Feed Subscription
   useEffect(() => {
-    let sse: EventSource | null = new EventSource("/api/stream");
+    const sse = new EventSource("/api/stream");
 
     sse.onopen = () => {
       setIsConnected(true);
@@ -163,7 +262,7 @@ export default function Dashboard() {
 
     sse.onerror = () => {
       setIsConnected(false);
-      sse?.close();
+      sse.close();
       // Retry connection every 5s
       setTimeout(() => {
         setIsConnected(false);
@@ -173,7 +272,7 @@ export default function Dashboard() {
     sse.onmessage = (event) => {
       try {
         const newChest: Chest = JSON.parse(event.data);
-        setChests((prev) => [newChest, ...prev]);
+        setRawChests((prev) => [newChest, ...prev]);
         playClaimSound();
       } catch (err) {
         console.error("Error parsing Server-Sent Event payload:", err);
@@ -181,9 +280,9 @@ export default function Dashboard() {
     };
 
     return () => {
-      sse?.close();
+      sse.close();
     };
-  }, [soundEnabled]);
+  }, [playClaimSound]);
 
   // WHITELIST OPERATIONS
   const handleAddPlayer = async (name: string) => {
@@ -329,10 +428,9 @@ export default function Dashboard() {
   // Calculate active scanners (distinct players in scanned list)
   const activeScanners = Array.from(new Set(chests.map((c) => c.fromPlayer))).length;
 
-  // Daily Average Calculator
   const getDailyAverage = () => {
     if (chests.length === 0) return 0;
-    const dates = chests.map((c) => new Date(c.time).toDateString());
+    const dates = chests.map((c) => c.gameDay);
     const uniqueDays = Array.from(new Set(dates)).length || 1;
     return Math.round(chests.length / uniqueDays);
   };
@@ -561,7 +659,7 @@ export default function Dashboard() {
                       {/* Right Block */}
                       <div className="flex md:flex-col items-end justify-between md:justify-center gap-2 text-right">
                         <div className="text-xs text-slate-300 font-medium">
-                          {new Date(chest.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          {formatUTC10Time(chest.time)}
                           <span className="text-[10px] text-slate-500 ml-1.5">
                             ({chest.gameDay})
                           </span>
@@ -766,22 +864,83 @@ export default function Dashboard() {
 
             {/* Leaderboard Grid */}
             <div className="glass-panel rounded-2xl p-5 flex flex-col min-h-[450px]">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
-                <div>
-                  <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
-                  <p className="text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
+              <div className="flex flex-col gap-2 mb-4">
+                <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
+                <p className="text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
+              </div>
+
+              <div className="flex flex-wrap gap-4 items-center justify-between mb-5 bg-slate-950/40 p-4 border border-slate-900 rounded-2xl">
+                {/* Left side filters */}
+                <div className="flex flex-wrap gap-3 items-center text-xs">
+                  {/* Source filter */}
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-slate-400 font-semibold">Source:</span>
+                    <select
+                      value={filterSource}
+                      onChange={(e) => setFilterSource(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
+                    >
+                      <option value="all">All Sources</option>
+                      <option value="Crypt">Crypts</option>
+                      <option value="Monster">Monsters</option>
+                      <option value="PvP">PvP</option>
+                      <option value="Arena">Arena</option>
+                      <option value="Tower">Tower</option>
+                      <option value="Clan">Clan</option>
+                      <option value="Chest">Chest</option>
+                    </select>
+                  </div>
+
+                  {/* Date range filter */}
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-slate-400 font-semibold">Date Range:</span>
+                    <select
+                      value={filterDateRange}
+                      onChange={(e) => setFilterDateRange(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
+                    >
+                      <option value="all">All Time</option>
+                      <option value="today">Today (UTC+10)</option>
+                      <option value="week">Past 7 Days</option>
+                      <option value="month">Past 30 Days</option>
+                    </select>
+                  </div>
+
+                  {/* Weekly target input */}
+                  <div className="flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-slate-400 font-semibold">Weekly Target:</span>
+                    <input
+                      type="number"
+                      value={weeklyTarget || ""}
+                      onChange={(e) => setWeeklyTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50 w-16 text-center font-bold"
+                    />
+                  </div>
                 </div>
 
-                {/* Search */}
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search player..."
-                    value={playerSearchQuery}
-                    onChange={(e) => setPlayerSearchQuery(e.target.value)}
-                    className="pl-9 pr-4 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-full md:w-56"
-                  />
+                {/* Right side search + download */}
+                <div className="flex gap-2 items-center w-full md:w-auto">
+                  <button
+                    onClick={() => handleExportCSV(contributionsList)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export CSV
+                  </button>
+
+                  <div className="relative w-full md:w-auto">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search player..."
+                      value={playerSearchQuery}
+                      onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                      className="pl-9 pr-4 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-full md:w-56"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -796,6 +955,7 @@ export default function Dashboard() {
                       <th className="py-3 px-4 text-center text-slate-400">Epic 🥈</th>
                       <th className="py-3 px-4 text-center text-slate-400">Rare/Crypt 🥉</th>
                       <th className="py-3 px-4 text-center font-bold text-gold text-slate-400">Total Drops</th>
+                      <th className="py-3 px-4 text-center text-slate-400 w-32">Target Progress</th>
                       <th className="py-3 px-4 w-40 text-slate-400">Status Level</th>
                     </tr>
                   </thead>
@@ -838,7 +998,12 @@ export default function Dashboard() {
                               )}
                             </td>
                             <td className="py-3 px-4 font-bold text-slate-200">
-                              {item.player}
+                              <button
+                                onClick={() => setSelectedPlayerDetail(item.player)}
+                                className="hover:text-gold hover:underline transition-all text-left font-bold"
+                              >
+                                {item.player}
+                              </button>
                             </td>
                             <td className="py-3 px-4 text-center font-mono font-bold text-amber-400">
                               {item.legendary > 0 ? `${item.legendary}×` : "-"}
@@ -851,6 +1016,25 @@ export default function Dashboard() {
                             </td>
                             <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm bg-amber-500/5">
                               {item.total}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {item.total >= weeklyTarget ? (
+                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                  Met ✅
+                                </span>
+                              ) : (
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    {item.total} / {weeklyTarget}
+                                  </span>
+                                  <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
+                                    <div 
+                                      style={{ width: `${Math.min(100, Math.round((item.total / weeklyTarget) * 100))}%` }} 
+                                      className="bg-amber-500 h-full rounded-full" 
+                                    />
+                                  </div>
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-4">
                               <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-bold ${statusColor}`}>
@@ -914,7 +1098,7 @@ export default function Dashboard() {
             <div className="flex-1 overflow-y-auto pr-1">
               {filteredPlayers.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 text-xs">
-                  No clan members matched "{playerSearchQuery}" or roster is empty.
+                  No clan members matched &quot;{playerSearchQuery}&quot; or roster is empty.
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
@@ -1090,6 +1274,167 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {/* 5. PLAYER DETAILS MODAL */}
+      {selectedPlayerDetail && (() => {
+        const contributionsList = getPlayerContributions();
+        const playerStats = contributionsList.find(c => c.player === selectedPlayerDetail) || {
+          player: selectedPlayerDetail, total: 0, legendary: 0, epic: 0, rare: 0, common: 0
+        };
+        const playerChests = chests.filter(c => c.fromPlayer === selectedPlayerDetail).slice(0, 10);
+        
+        // Group scans by source for the mini-chart
+        const sourceCounts: Record<string, number> = {};
+        chests.filter(c => c.fromPlayer === selectedPlayerDetail).forEach(c => {
+          sourceCounts[c.source] = (sourceCounts[c.source] || 0) + 1;
+        });
+
+        // status badge
+        let statusText = "Recruit";
+        let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
+        if (playerStats.total >= 30) {
+          statusText = "Elite Raider";
+          statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
+        } else if (playerStats.total >= 15) {
+          statusText = "Heavy Raider";
+          statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
+        } else if (playerStats.total >= 5) {
+          statusText = "Active Member";
+          statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
+        } else if (playerStats.total > 0) {
+          statusText = "Contributor";
+          statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+            <div className="glass-panel max-w-lg w-full rounded-2xl p-6 relative border-amber-500/20 max-h-[90vh] overflow-y-auto">
+              <button 
+                onClick={() => setSelectedPlayerDetail(null)}
+                className="absolute top-4 right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-br from-amber-400 to-amber-600 p-2.5 rounded-xl">
+                  <Users className="w-6 h-6 text-[#030307]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-slate-100">{selectedPlayerDetail}</h2>
+                    <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold ${statusColor}`}>
+                      {statusText}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">ELF Clan Member Stats</p>
+                </div>
+              </div>
+
+              {/* Rarity breakdown */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="bg-slate-950/50 border border-slate-900 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-550 font-bold uppercase">Total Scanned</span>
+                  <p className="text-2xl font-black text-slate-100 mt-1">{playerStats.total}</p>
+                </div>
+                <div className="bg-slate-950/50 border border-slate-900 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-550 font-bold uppercase">Target Progress</span>
+                  <p className="text-lg font-black text-gold mt-1">
+                    {playerStats.total} / {weeklyTarget}
+                    <span className="text-xs text-slate-450 ml-1">({Math.min(100, Math.round((playerStats.total / weeklyTarget) * 100))}%)</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Quality Distribution */}
+              <div className="mb-6">
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Chest Quality Share</h3>
+                {playerStats.total === 0 ? (
+                  <p className="text-xs text-slate-500">No scanned chests recorded for this player.</p>
+                ) : (
+                  <div className="flex flex-col gap-2 text-xs">
+                    {/* Legendary */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="font-bold text-gold">Legendary/Gold</span>
+                        <span className="text-slate-400">{playerStats.legendary} ({Math.round((playerStats.legendary / playerStats.total) * 100)}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div style={{ width: `${(playerStats.legendary / playerStats.total) * 100}%` }} className="bg-amber-400 h-full rounded-full" />
+                      </div>
+                    </div>
+                    {/* Epic */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="font-bold text-purple-400">Epic</span>
+                        <span className="text-slate-400">{playerStats.epic} ({Math.round((playerStats.epic / playerStats.total) * 100)}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div style={{ width: `${(playerStats.epic / playerStats.total) * 100}%` }} className="bg-purple-500 h-full rounded-full" />
+                      </div>
+                    </div>
+                    {/* Rare */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="font-bold text-blue-400">Rare/Crypt</span>
+                        <span className="text-slate-400">{playerStats.rare} ({Math.round((playerStats.rare / playerStats.total) * 100)}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div style={{ width: `${(playerStats.rare / playerStats.total) * 100}%` }} className="bg-blue-500 h-full rounded-full" />
+                      </div>
+                    </div>
+                    {/* Common */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="font-bold text-green-400">Common</span>
+                        <span className="text-slate-400">{playerStats.common} ({Math.round((playerStats.common / playerStats.total) * 100)}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div style={{ width: `${(playerStats.common / playerStats.total) * 100}%` }} className="bg-green-500 h-full rounded-full" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Source Distribution */}
+              <div className="mb-6">
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Sources Contributed</h3>
+                {Object.keys(sourceCounts).length === 0 ? (
+                  <p className="text-xs text-slate-500">No source data available.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(sourceCounts).map(([source, count]) => (
+                      <span key={source} className="bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-lg text-xs text-slate-300">
+                        {source}: <strong className="text-gold">{count}</strong>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent Drops */}
+              <div>
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Recent Scan Activity (Last 10)</h3>
+                {playerChests.length === 0 ? (
+                  <p className="text-xs text-slate-500">No recent activity.</p>
+                ) : (
+                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                    {playerChests.map(chest => (
+                      <div key={chest.id} className="p-2.5 bg-slate-950/70 border border-slate-900 rounded-lg flex justify-between items-center text-[11px]">
+                        <div>
+                          <p className="font-bold text-slate-200">{chest.chestName}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">Source: {chest.source}</p>
+                        </div>
+                        <span className="text-slate-400 font-mono">{formatUTC10Time(chest.time)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }

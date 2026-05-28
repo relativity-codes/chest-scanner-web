@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
       // Send standard retry interval and connection ping
       controller.enqueue(new TextEncoder().encode("retry: 1000\n\n"));
 
-      const onChestScanned = (chest: any) => {
+      const onChestScanned = (chest: unknown) => {
         const data = `data: ${JSON.stringify(chest)}\n\n`;
         controller.enqueue(new TextEncoder().encode(data));
       };

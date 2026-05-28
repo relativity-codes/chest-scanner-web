@@ -1,8 +1,18 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
 import { canonicalizePlayerName } from "@/lib/canonicalization";
 import { sendDiscordAlert } from "@/lib/discord";
+
+function getUTC10GameDay(date: Date): string {
+  const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
+  const d = new Date(utc10Time);
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `chests_${yyyy}-${mm}-${dd}`;
+}
 
 // GET: Fetch chest scans
 export async function GET(req: NextRequest) {
@@ -38,13 +48,15 @@ export async function POST(req: NextRequest) {
 
     const canonicalPlayer = await canonicalizePlayerName(fromPlayer);
 
+    const chestTime = new Date(time);
+
     const chest = await db.chest.create({
       data: {
         chestName,
         fromPlayer: canonicalPlayer,
         source,
-        time: new Date(time),
-        gameDay,
+        time: chestTime,
+        gameDay: getUTC10GameDay(chestTime),
         originalTimer: originalTimer || "",
       },
     });
