@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Activity,
@@ -80,6 +80,136 @@ function getUTC10GameDayStr(date: Date): string {
   return `chests_${yyyy}-${mm}-${dd}`;
 }
 
+const ChestIcon = ({ type, className = "w-10 h-10" }: { type: string; className?: string }) => {
+  if (type === "legendary") {
+    return (
+      <svg className={className} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="24" fill="url(#legendaryGlow)" opacity="0.4" />
+        <ellipse cx="32" cy="54" rx="20" ry="6" fill="#000" opacity="0.6" />
+        <rect x="12" y="28" width="40" height="24" rx="3" fill="url(#goldGrad)" stroke="#5c4308" strokeWidth="2" />
+        <rect x="20" y="28" width="6" height="24" fill="#3a2a05" />
+        <rect x="38" y="28" width="6" height="24" fill="#3a2a05" />
+        <rect x="22" y="28" width="2" height="24" fill="#ffd700" />
+        <rect x="40" y="22" width="2" height="30" fill="#ffd700" />
+        <path d="M10 28 C10 14, 54 14, 54 28 Z" fill="url(#goldLidGrad)" stroke="#5c4308" strokeWidth="2" />
+        <path d="M18 28 C18 17, 28 17, 28 28 Z" fill="#3a2a05" />
+        <path d="M36 28 C36 17, 46 17, 46 28 Z" fill="#3a2a05" />
+        <path d="M20 28 C20 18, 26 18, 26 28 Z" fill="#ffd700" opacity="0.8" />
+        <path d="M38 28 C38 18, 44 18, 44 28 Z" fill="#ffd700" opacity="0.8" />
+        <rect x="27" y="24" width="10" height="10" rx="1.5" fill="#2c2004" stroke="#ffd700" strokeWidth="1.5" />
+        <circle cx="32" cy="29" r="1.5" fill="#ffd700" />
+        <line x1="32" y1="29.5" x2="32" y2="33" stroke="#ffd700" strokeWidth="1.5" />
+        <polygon points="32,8 35,13 32,18 29,13" fill="#ffd700" />
+        <circle cx="23" cy="22" r="1.5" fill="#f43f5e" />
+        <circle cx="41" cy="22" r="1.5" fill="#f43f5e" />
+      </svg>
+    );
+  }
+
+  if (type === "epic") {
+    return (
+      <svg className={className} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="24" fill="url(#epicGlow)" opacity="0.35" />
+        <ellipse cx="32" cy="54" rx="20" ry="6" fill="#000" opacity="0.6" />
+        <rect x="12" y="28" width="40" height="24" rx="3" fill="url(#purpleGrad)" stroke="#4c1d95" strokeWidth="2" />
+        <rect x="20" y="28" width="6" height="24" fill="#2e1065" />
+        <rect x="38" y="28" width="6" height="24" fill="#2e1065" />
+        <rect x="22" y="28" width="2" height="24" fill="#c084fc" />
+        <rect x="40" y="28" width="2" height="24" fill="#c084fc" />
+        <path d="M10 28 C10 14, 54 14, 54 28 Z" fill="url(#purpleLidGrad)" stroke="#4c1d95" strokeWidth="2" />
+        <path d="M18 28 C18 17, 28 17, 28 28 Z" fill="#2e1065" />
+        <path d="M36 28 C36 17, 46 17, 46 28 Z" fill="#2e1065" />
+        <polygon points="32,21 37,27 32,33 27,27" fill="#e9d5ff" stroke="#a855f7" strokeWidth="1.5" />
+        <circle cx="32" cy="27" r="2" fill="#c084fc" />
+      </svg>
+    );
+  }
+
+  if (type === "rare") {
+    return (
+      <svg className={className} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="24" fill="url(#rareGlow)" opacity="0.3" />
+        <ellipse cx="32" cy="54" rx="20" ry="6" fill="#000" opacity="0.6" />
+        <rect x="12" y="28" width="40" height="24" rx="3" fill="url(#blueGrad)" stroke="#1e3a8a" strokeWidth="2" />
+        <rect x="20" y="28" width="6" height="24" fill="#0f172a" />
+        <rect x="38" y="28" width="6" height="24" fill="#0f172a" />
+        <rect x="22" y="28" width="2" height="24" fill="#60a5fa" />
+        <rect x="40" y="28" width="2" height="24" fill="#60a5fa" />
+        <path d="M10 28 C10 14, 54 14, 54 28 Z" fill="url(#blueLidGrad)" stroke="#1e3a8a" strokeWidth="2" />
+        <path d="M18 28 C18 17, 28 17, 28 28 Z" fill="#0f172a" />
+        <path d="M36 28 C36 17, 46 17, 46 28 Z" fill="#0f172a" />
+        <rect x="28" y="24" width="8" height="8" rx="1" fill="#0f172a" stroke="#60a5fa" strokeWidth="1" />
+        <circle cx="32" cy="28" r="1.5" fill="#60a5fa" />
+      </svg>
+    );
+  }
+
+  if (type === "heroic") {
+    return (
+      <svg className={className} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="24" fill="url(#cyanGlow)" opacity="0.3" />
+        <ellipse cx="32" cy="54" rx="20" ry="6" fill="#000" opacity="0.6" />
+        <rect x="12" y="28" width="40" height="24" rx="3" fill="url(#cyanGrad)" stroke="#0e7490" strokeWidth="2" />
+        <rect x="20" y="28" width="6" height="24" fill="#0f172a" />
+        <rect x="38" y="28" width="6" height="24" fill="#0f172a" />
+        <path d="M10 28 C10 14, 54 14, 54 28 Z" fill="url(#cyanLidGrad)" stroke="#0e7490" strokeWidth="2" />
+        <rect x="29" y="25" width="6" height="6" rx="1" fill="#0f172a" stroke="#22d3ee" strokeWidth="1" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className={className} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="32" cy="54" rx="18" ry="5" fill="#000" opacity="0.6" />
+      <rect x="14" y="30" width="36" height="22" rx="2" fill="url(#woodGrad)" stroke="#451a03" strokeWidth="2" />
+      <rect x="22" y="30" width="4" height="22" fill="#78350f" />
+      <rect x="38" y="30" width="4" height="22" fill="#78350f" />
+      <path d="M12 30 C12 18, 52 18, 52 30 Z" fill="url(#woodLidGrad)" stroke="#451a03" strokeWidth="2" />
+      <rect x="30" y="28" width="4" height="5" fill="#78350f" stroke="#f59e0b" strokeWidth="1" />
+    </svg>
+  );
+};
+
+const CircularProgress = ({ percent, color, label, count }: { percent: number; color: string; label: string; count: number }) => {
+  const radius = 28;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (percent / 100) * circumference;
+
+  return (
+    <div className="flex flex-col items-center justify-center p-3.5 bg-slate-950/45 border border-slate-900 rounded-xl relative">
+      <div className="relative w-16 h-16 flex items-center justify-center">
+        <svg className="w-full h-full transform -rotate-90">
+          <circle
+            cx="32"
+            cy="32"
+            r={radius}
+            className="stroke-slate-900"
+            strokeWidth="4"
+            fill="transparent"
+          />
+          <circle
+            cx="32"
+            cy="32"
+            r={radius}
+            stroke={color}
+            strokeWidth="4"
+            fill="transparent"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            className="transition-all duration-700 ease-out"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-[11px] font-black text-slate-100 font-sans">{percent}%</span>
+        </div>
+      </div>
+      <span className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-wide text-center">{label}</span>
+      <span className="text-[9px] text-slate-550 font-mono mt-0.5">{count} drops</span>
+    </div>
+  );
+};
+
 export default function Dashboard() {
   const t = useTranslations('Dashboard');
   const [rawChests, setRawChests] = useState<Chest[]>([]);
@@ -100,7 +230,7 @@ export default function Dashboard() {
 
 
   // Compute active filtered chests
-  const getFilteredChests = () => {
+  const chests = useMemo(() => {
     return rawChests.filter(chest => {
       if (filterSource !== "all" && chest.source !== filterSource) {
         return false;
@@ -122,9 +252,7 @@ export default function Dashboard() {
       }
       return true;
     });
-  };
-
-  const chests = getFilteredChests();
+  }, [rawChests, filterSource, filterDateRange]);
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
@@ -190,7 +318,7 @@ export default function Dashboard() {
   }, [filterDateRange, fetchChests]);
 
   // Real-Time Player Contributions Aggregation
-  const getPlayerContributions = () => {
+  const contributionsList = useMemo(() => {
     const contributions: Record<string, {
       total: number;
       legendary: number;
@@ -251,16 +379,13 @@ export default function Dashboard() {
     return Object.entries(contributions)
       .map(([player, stats]) => ({ player, ...stats }))
       .sort((a, b) => b.total - a.total);
-  };
+  }, [chests, rawChests, players, dailyTarget, weeklyTarget]);
 
   const handleExportCSV = (contributionsList: PlayerContribution[]) => {
-    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Source Breakdown", "Total Drops", "Daily Target (20) Status", "Weekly Target (150) Status"];
+    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Total Drops", "Daily Target (20) Status", "Weekly Target (150) Status"];
     const rows = contributionsList.map((item, idx) => {
       const dailyStatus = item.todayCount >= dailyTarget ? "Target Met" : `${item.todayCount}/${dailyTarget}`;
       const weeklyStatus = item.weeklyCount >= weeklyTarget ? "Target Met" : `${item.weeklyCount}/${weeklyTarget}`;
-      const sourceStr = Object.entries(item.sources || {})
-        .map(([src, count]) => `${src}: ${count}`)
-        .join(" | ");
       return [
         idx + 1,
         `"${item.player.replace(/"/g, '""')}"`,
@@ -268,7 +393,6 @@ export default function Dashboard() {
         item.epic,
         item.rare,
         item.common,
-        `"${sourceStr.replace(/"/g, '""')}"`,
         item.total,
         `"${dailyStatus}"`,
         `"${weeklyStatus}"`
@@ -474,33 +598,40 @@ export default function Dashboard() {
   const getChestColor = (name: string) => {
     const n = name.toLowerCase();
     if (n.includes("legendary") || n.includes("golden") || n.includes("gold")) {
-      return { bg: "rgba(223, 178, 57, 0.1)", border: "rgba(223, 178, 57, 0.35)", text: "#dfb239", textGlow: "text-gold-bright" };
+      return { type: "legendary", bg: "rgba(223, 178, 57, 0.06)", border: "rgba(223, 178, 57, 0.3)", text: "#dfb239", textGlow: "text-gold-bright" };
     }
     if (n.includes("epic") || n.includes("dragon")) {
-      return { bg: "rgba(147, 51, 234, 0.08)", border: "rgba(147, 51, 234, 0.35)", text: "#c084fc", textGlow: "text-purple-400" };
+      return { type: "epic", bg: "rgba(147, 51, 234, 0.05)", border: "rgba(147, 51, 234, 0.25)", text: "#c084fc", textGlow: "text-purple-400" };
     }
     if (n.includes("rare") || n.includes("crypt") || n.includes("captain")) {
-      return { bg: "rgba(59, 130, 246, 0.08)", border: "rgba(59, 130, 246, 0.35)", text: "#60a5fa", textGlow: "text-blue-400" };
+      return { type: "rare", bg: "rgba(59, 130, 246, 0.05)", border: "rgba(59, 130, 246, 0.25)", text: "#60a5fa", textGlow: "text-blue-400" };
     }
     if (n.includes("heroic") || n.includes("clan")) {
-      return { bg: "rgba(6, 182, 212, 0.08)", border: "rgba(6, 182, 212, 0.35)", text: "#22d3ee", textGlow: "text-cyan-400" };
+      return { type: "heroic", bg: "rgba(6, 182, 212, 0.05)", border: "rgba(6, 182, 212, 0.25)", text: "#22d3ee", textGlow: "text-cyan-400" };
     }
-    return { bg: "rgba(34, 197, 94, 0.05)", border: "rgba(34, 197, 94, 0.2)", text: "#4ade80", textGlow: "text-green-400" };
+    return { type: "common", bg: "rgba(34, 197, 94, 0.04)", border: "rgba(34, 197, 94, 0.15)", text: "#4ade80", textGlow: "text-green-400" };
   };
 
   // STATISTICS CALCULATIONS
   const totalChests = chests.length;
 
   // Calculate active scanners (distinct players in scanned list)
-  const activeScanners = Array.from(new Set(chests.map((c) => c.fromPlayer))).length;
+  const activeScanners = useMemo(() => {
+    return Array.from(new Set(chests.map((c) => c.fromPlayer))).length;
+  }, [chests]);
 
-  const getDailyAverage = () => {
+  const dailyAverage = useMemo(() => {
     if (chests.length === 0) return 0;
     const dates = chests.map((c) => c.gameDay);
     const uniqueDays = Array.from(new Set(dates)).length || 1;
     return Math.round(chests.length / uniqueDays);
-  };
-  const dailyAverage = getDailyAverage();
+  }, [chests]);
+
+  // Today's total chests (based on rawChests so it always reflects "today" regardless of the active date filter)
+  const todayTotal = useMemo(() => {
+    const todayGameDayStr = getUTC10GameDayStr(new Date());
+    return rawChests.filter((c) => c.gameDay === todayGameDayStr).length;
+  }, [rawChests]);
 
   // Whitelist filtering
   const filteredPlayers = players.filter((p) =>
@@ -508,22 +639,84 @@ export default function Dashboard() {
   );
 
   // Custom Chart: Chest Rarity Share
-  const getRarityStats = () => {
+  const rarityStats = useMemo(() => {
     let legendary = 0, epic = 0, rare = 0, heroic = 0, common = 0;
     chests.forEach((c) => {
       const colorStyle = getChestColor(c.chestName);
-      if (colorStyle.text === "#dfb239") legendary++;
-      else if (colorStyle.text === "#c084fc") epic++;
-      else if (colorStyle.text === "#60a5fa") rare++;
-      else if (colorStyle.text === "#22d3ee") heroic++;
+      if (colorStyle.type === "legendary") legendary++;
+      else if (colorStyle.type === "epic") epic++;
+      else if (colorStyle.type === "rare") rare++;
+      else if (colorStyle.type === "heroic") heroic++;
       else common++;
     });
     return { legendary, epic, rare, heroic, common };
-  };
-  const rarityStats = getRarityStats();
+  }, [chests]);
 
   return (
-    <main className="min-h-screen bg-[#030307] text-[#f8fafc] font-sans antialiased p-2.5 sm:p-4 md:p-8">
+    <main className="min-h-screen bg-[#05060b] text-[#f2f5fa] font-sans antialiased p-2.5 sm:p-4 md:p-8 relative">
+      {/* Shared SVG Gradients Defs for Performance */}
+      <svg style={{ display: 'none' }}>
+        <defs>
+          <radialGradient id="legendaryGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#d97706" />
+            <stop offset="50%" stopColor="#b45309" />
+            <stop offset="100%" stopColor="#78350f" />
+          </linearGradient>
+          <linearGradient id="goldLidGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#fbbf24" />
+            <stop offset="40%" stopColor="#d97706" />
+            <stop offset="100%" stopColor="#b45309" />
+          </linearGradient>
+          <radialGradient id="epicGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#c084fc" />
+            <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="purpleGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6d28d9" />
+            <stop offset="100%" stopColor="#4c1d95" />
+          </linearGradient>
+          <linearGradient id="purpleLidGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a855f7" />
+            <stop offset="100%" stopColor="#6d28d9" />
+          </linearGradient>
+          <radialGradient id="rareGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#3b82f6" />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#1d4ed8" />
+            <stop offset="100%" stopColor="#1e3a8a" />
+          </linearGradient>
+          <linearGradient id="blueLidGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3b82f6" />
+            <stop offset="100%" stopColor="#1d4ed8" />
+          </linearGradient>
+          <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#06b6d4" />
+            <stop offset="100%" stopColor="#06b6d4" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="cyanGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0891b2" />
+            <stop offset="100%" stopColor="#0e7490" />
+          </linearGradient>
+          <linearGradient id="cyanLidGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#22d3ee" />
+            <stop offset="100%" stopColor="#0891b2" />
+          </linearGradient>
+          <linearGradient id="woodGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#92400e" />
+            <stop offset="100%" stopColor="#78350f" />
+          </linearGradient>
+          <linearGradient id="woodLidGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#b45309" />
+            <stop offset="100%" stopColor="#92400e" />
+          </linearGradient>
+        </defs>
+      </svg>
       {/* Background ambient lighting */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-amber-500/5 rounded-full blur-[150px] -z-10 pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-[120px] -z-10 pointer-events-none" />
@@ -535,8 +728,8 @@ export default function Dashboard() {
             <Flame className="w-6 h-6 text-[#030307] stroke-[2.5]" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold">{t('title')}</h1>
-            <p className="text-xs text-slate-400 font-medium">{t('subtitle')}</p>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold font-cinzel uppercase tracking-wider">{t('title')}</h1>
+            <p className="text-xs text-slate-400 font-medium tracking-wide">{t('subtitle')}</p>
           </div>
         </div>
 
@@ -595,7 +788,7 @@ export default function Dashboard() {
       </header>
 
       {/* CORE STATISTICS CARDS */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 md:mb-8">
+      <section className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6 md:mb-8">
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
           <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CHESTS LOGGED</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
@@ -643,6 +836,18 @@ export default function Dashboard() {
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <ShieldAlert className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${unknownPlayers.length > 0 ? "text-rose-450" : "text-emerald-400"}`} />
             <span>Unknown names flagged</span>
+          </div>
+        </div>
+
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TODAY&apos;S CHESTS</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{todayTotal}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">total</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
+            <span>UTC+10 game day</span>
           </div>
         </div>
       </section>
@@ -715,48 +920,53 @@ export default function Dashboard() {
                   <p className="text-xs text-slate-600">Start the Android mobile scanner overlay to log game drops.</p>
                 </div>
               ) : (
-                chests.map((chest, index) => {
+                chests.slice(0, 100).map((chest, index) => {
                   const style = getChestColor(chest.chestName);
+                  let borderGlow = "border-slate-800/40";
+                  if (style.type === "legendary") borderGlow = "gold-glow-border";
+                  else if (style.type === "epic") borderGlow = "purple-glow-border";
+                  else if (style.type === "rare") borderGlow = "blue-glow-border";
                   return (
                     <div
                       key={chest.id}
                       style={{
                         backgroundColor: style.bg,
-                        borderColor: style.border
                       }}
-                      className={`border p-3 sm:p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 ${index === 0 ? "animate-scan-card" : ""
+                      className={`border ${borderGlow} p-3.5 sm:p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex items-center justify-between gap-4 ${index === 0 ? "animate-scan-card" : ""
                         }`}
                     >
-                      {/* Left Block */}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-base font-bold tracking-tight ${style.textGlow}`}>
-                            {chest.chestName}
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-900/60 border border-slate-800 text-slate-400">
-                            {chest.source}
-                          </span>
+                      {/* Left Block: Icon + Details */}
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="flex-shrink-0">
+                          <ChestIcon type={style.type} className="w-11 h-11" />
                         </div>
-
-                        <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
-                          <span>Claimed by:</span>
-                          <span className="font-semibold text-slate-300">{chest.fromPlayer}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-sm sm:text-base font-bold tracking-tight font-cinzel ${style.textGlow} truncate`}>
+                              {chest.chestName}
+                            </span>
+                            <span className="text-[9px] uppercase font-bold px-1.5 py-0.25 rounded bg-slate-950/60 border border-slate-850 text-slate-400">
+                              {chest.source}
+                            </span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-[11px] text-slate-400 mt-1">
+                            <div>
+                              <span>Claimed by:</span>
+                              <span className="font-bold text-slate-200 ml-1">{chest.fromPlayer}</span>
+                            </div>
+                            <span className="hidden sm:inline text-slate-700">•</span>
+                          </div>
                         </div>
                       </div>
 
                       {/* Right Block */}
-                      <div className="flex md:flex-col items-end justify-between md:justify-center gap-2 text-right">
-                        <div className="text-xs text-slate-300 font-medium">
+                      <div className="flex-shrink-0 flex flex-col items-end gap-1 text-right text-[11px]">
+                        <div className="text-slate-350 font-mono font-medium">
                           {formatUTC10Time(chest.time)}
-                          <span className="text-[10px] text-slate-550 ml-1.5">
-                            ({chest.gameDay})
-                          </span>
                         </div>
-                        {chest.originalTimer && (
-                          <div className="text-[10px] text-slate-550 font-mono">
-                            OCR Timer: {chest.originalTimer}
-                          </div>
-                        )}
+                        <div className="text-[10px] text-slate-550 font-mono">
+                          {chest.gameDay}
+                        </div>
                       </div>
                     </div>
                   );
@@ -769,101 +979,52 @@ export default function Dashboard() {
           <div className="flex flex-col gap-5 lg:gap-6">
             {/* Visual SVG Distribution Charts */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5">
-              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3.5 sm:mb-4 uppercase">CHEST QUALITY SHARE</h2>
+              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3.5 sm:mb-4 uppercase font-cinzel text-gold">CHEST QUALITY SHARE</h2>
 
               {chests.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-xs text-slate-500">
                   Waiting for database records to map analytics...
                 </div>
               ) : (
-                <div className="flex flex-col gap-3.5 text-xs">
-                  {/* Legendary Progress */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="font-bold text-gold">LEGENDARY / GOLD</span>
-                      <span className="font-mono text-slate-300">
-                        {rarityStats.legendary} ({Math.round((rarityStats.legendary / chests.length) * 100)}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${(rarityStats.legendary / chests.length) * 100}%` }}
-                        className="bg-gradient-to-r from-amber-500 to-amber-300 h-full rounded-full"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Epic Progress */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="font-bold text-purple-400">EPIC / DRAGON</span>
-                      <span className="font-mono text-slate-300">
-                        {rarityStats.epic} ({Math.round((rarityStats.epic / chests.length) * 100)}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${(rarityStats.epic / chests.length) * 100}%` }}
-                        className="bg-gradient-to-r from-purple-500 to-purple-400 h-full rounded-full"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Rare Progress */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="font-bold text-blue-400">RARE / CRYPT</span>
-                      <span className="font-mono text-slate-300">
-                        {rarityStats.rare} ({Math.round((rarityStats.rare / chests.length) * 100)}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${(rarityStats.rare / chests.length) * 100}%` }}
-                        className="bg-gradient-to-r from-blue-500 to-blue-400 h-full rounded-full"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Heroic Progress */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="font-bold text-cyan-400">HEROIC / CLAN</span>
-                      <span className="font-mono text-slate-300">
-                        {rarityStats.heroic} ({Math.round((rarityStats.heroic / chests.length) * 100)}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${(rarityStats.heroic / chests.length) * 100}%` }}
-                        className="bg-gradient-to-r from-cyan-500 to-cyan-400 h-full rounded-full"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Common Progress */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="font-bold text-green-400">COMMON</span>
-                      <span className="font-mono text-slate-300">
-                        {rarityStats.common} ({Math.round((rarityStats.common / chests.length) * 100)}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900 border border-slate-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${(rarityStats.common / chests.length) * 100}%` }}
-                        className="bg-gradient-to-r from-green-500 to-green-400 h-full rounded-full"
-                      />
-                    </div>
-                  </div>
+                <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-3.5">
+                  <CircularProgress
+                    percent={Math.round((rarityStats.legendary / chests.length) * 100) || 0}
+                    color="#dfb239"
+                    label="Legendary"
+                    count={rarityStats.legendary}
+                  />
+                  <CircularProgress
+                    percent={Math.round((rarityStats.epic / chests.length) * 100) || 0}
+                    color="#c084fc"
+                    label="Epic"
+                    count={rarityStats.epic}
+                  />
+                  <CircularProgress
+                    percent={Math.round((rarityStats.rare / chests.length) * 100) || 0}
+                    color="#60a5fa"
+                    label="Rare"
+                    count={rarityStats.rare}
+                  />
+                  <CircularProgress
+                    percent={Math.round((rarityStats.heroic / chests.length) * 100) || 0}
+                    color="#22d3ee"
+                    label="Heroic"
+                    count={rarityStats.heroic}
+                  />
+                  <CircularProgress
+                    percent={Math.round((rarityStats.common / chests.length) * 100) || 0}
+                    color="#4ade80"
+                    label="Common"
+                    count={rarityStats.common}
+                  />
                 </div>
               )}
             </div>
 
             {/* Top Contributor list */}
-            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex-1 overflow-hidden flex flex-col max-h-[350px]">
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col">
               <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">TOP ACTIVE SCANNERS</h2>
-              <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
+              <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
                 {chests.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-slate-500">
                     No scanner ranking metrics available.
@@ -901,7 +1062,7 @@ export default function Dashboard() {
 
       {/* 4. TAB: PLAYER CONTRIBUTIONS LEADERBOARD */}
       {activeTab === "contributions" && (() => {
-        const contributionsList = getPlayerContributions();
+        // contributionsList is already memoized above
         const topContributor = contributionsList[0]?.player || "None";
         const topContributorCount = contributionsList[0]?.total || 0;
         const totalScanChests = chests.length;
@@ -1048,17 +1209,16 @@ export default function Dashboard() {
               <div className="hidden md:block overflow-x-auto flex-1">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
-                      <th className="py-3 px-4 w-16 text-slate-400">Rank</th>
-                      <th className="py-3 px-4 text-slate-400">Player Name</th>
-                      <th className="py-3 px-4 text-center text-slate-400">Legendary 🥇</th>
-                      <th className="py-3 px-4 text-center text-slate-400">Epic 🥈</th>
-                      <th className="py-3 px-4 text-center text-slate-400">Rare/Crypt 🥉</th>
-                      <th className="py-3 px-4 text-center text-slate-400">Source Breakdown</th>
-                      <th className="py-3 px-4 text-center font-bold text-gold text-slate-400">Total Drops</th>
-                      <th className="py-3 px-4 text-center text-slate-400 w-32">Daily Target ({dailyTarget})</th>
-                      <th className="py-3 px-4 text-center text-slate-400 w-32">Weekly Target ({weeklyTarget})</th>
-                      <th className="py-3 px-4 w-40 text-slate-400">Status Level</th>
+                    <tr className="border-b border-slate-850 text-slate-450 font-bold uppercase tracking-wider font-cinzel">
+                      <th className="py-3 px-4 w-16 text-slate-450">Rank</th>
+                      <th className="py-3 px-4 text-slate-455">Player Name</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Legendary 🥇</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Epic 🥈</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Rare/Crypt 🥉</th>
+                      <th className="py-3 px-4 text-center font-bold text-gold text-slate-455">Total Drops</th>
+                      <th className="py-3 px-4 text-center text-slate-455 w-32">Daily Target ({dailyTarget})</th>
+                      <th className="py-3 px-4 text-center text-slate-455 w-32">Weekly Target ({weeklyTarget})</th>
+                      <th className="py-3 px-4 w-40 text-slate-455">Status Level</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1115,23 +1275,6 @@ export default function Dashboard() {
                             </td>
                             <td className="py-3 px-4 text-center font-mono font-bold text-sky-400">
                               {item.rare > 0 ? `${item.rare}×` : "-"}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <div className="flex flex-wrap justify-center gap-1.5 max-w-[200px] mx-auto">
-                                {Object.entries(item.sources || {}).map(([src, count]) => {
-                                  if (count === 0) return null;
-                                  let badgeStyle = "bg-slate-900 border-slate-800 text-slate-400";
-                                  if (src === "Monster") badgeStyle = "bg-rose-500/10 border-rose-500/20 text-rose-450";
-                                  else if (src === "Crypt") badgeStyle = "bg-sky-500/10 border-sky-500/20 text-sky-400";
-                                  else if (src === "PvP") badgeStyle = "bg-amber-500/10 border-amber-500/20 text-amber-400";
-                                  else if (src === "Clan") badgeStyle = "bg-emerald-500/10 border-emerald-500/20 text-emerald-450";
-                                  return (
-                                    <span key={src} className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeStyle}`}>
-                                      {src}: {count}
-                                    </span>
-                                  );
-                                })}
-                              </div>
                             </td>
                             <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm bg-amber-500/5">
                               {item.total}
@@ -1250,25 +1393,6 @@ export default function Dashboard() {
                             <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
                           </div>
                         </div>
-
-                        {/* Source breakdown */}
-                        {Object.keys(item.sources).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {Object.entries(item.sources).map(([src, count]) => {
-                              if (count === 0) return null;
-                              let badgeStyle = "bg-slate-900 border-slate-800 text-slate-400";
-                              if (src === "Monster") badgeStyle = "bg-rose-500/10 border-rose-500/20 text-rose-450";
-                              else if (src === "Crypt") badgeStyle = "bg-sky-500/10 border-sky-500/20 text-sky-400";
-                              else if (src === "PvP") badgeStyle = "bg-amber-500/10 border-amber-500/20 text-amber-400";
-                              else if (src === "Clan") badgeStyle = "bg-emerald-500/10 border-emerald-500/20 text-emerald-450";
-                              return (
-                                <span key={src} className={`px-1.5 py-0.5 rounded border text-[8.5px] font-bold ${badgeStyle}`}>
-                                  {src}: {count}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
 
                         {/* Progress Bars (Compact Side-by-Side) */}
                         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-900/40 text-[9px] sm:text-[10px]">
@@ -1539,7 +1663,7 @@ export default function Dashboard() {
       )}
       {/* 5. PLAYER DETAILS MODAL */}
       {selectedPlayerDetail && (() => {
-        const contributionsList = getPlayerContributions();
+        // contributionsList is already memoized above
         const playerStats = contributionsList.find(c => c.player === selectedPlayerDetail) || {
           player: selectedPlayerDetail, total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0
         };

@@ -1,31 +1,49 @@
 @import "tailwindcss";
 
 :root {
-  --background: #030307;
-  --foreground: #f8fafc;
+  --background: #05060b;
+  --foreground: #f2f5fa;
+  --gold: #dfb239;
+  --gold-glow: rgba(223, 178, 57, 0.45);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-outfit), sans-serif;
   overflow-x: hidden;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(223, 178, 57, 0.02) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.02) 0%, transparent 40%);
 }
 
-/* Glassmorphism panel styles */
+.font-cinzel {
+  font-family: var(--font-cinzel), serif;
+}
+
+.font-outfit {
+  font-family: var(--font-outfit), sans-serif;
+}
+
+/* Medieval Gaming Panels */
 .glass-panel {
-  background: rgba(12, 13, 24, 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(223, 178, 57, 0.08);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  background: linear-gradient(135deg, rgba(10, 11, 22, 0.75) 0%, rgba(7, 8, 15, 0.85) 100%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(223, 178, 57, 0.07);
+  box-shadow: 
+    0 10px 30px -10px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.03);
 }
 
 .glass-panel-glow {
-  background: rgba(16, 18, 35, 0.65);
+  background: linear-gradient(135deg, rgba(14, 16, 32, 0.8) 0%, rgba(9, 10, 20, 0.9) 100%);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(223, 178, 57, 0.2);
-  box-shadow: 0 0 25px 0 rgba(223, 178, 57, 0.08);
+  border: 1px solid rgba(223, 178, 57, 0.18);
+  box-shadow: 
+    0 0 25px 0 rgba(223, 178, 57, 0.05),
+    inset 0 1px 1px 0px rgba(223, 178, 57, 0.1);
 }
 
 /* Glowing text matching game elements */
@@ -39,23 +57,38 @@ body {
   text-shadow: 0 0 15px rgba(247, 208, 112, 0.5);
 }
 
+.gold-glow-border {
+  border-color: rgba(223, 178, 57, 0.3);
+  box-shadow: 0 0 15px 0 rgba(223, 178, 57, 0.1);
+}
+
+.purple-glow-border {
+  border-color: rgba(168, 85, 247, 0.25);
+  box-shadow: 0 0 15px 0 rgba(168, 85, 247, 0.08);
+}
+
+.blue-glow-border {
+  border-color: rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 15px 0 rgba(59, 130, 246, 0.08);
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(10, 11, 20, 0.6);
+  background: rgba(4, 5, 10, 0.8);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(223, 178, 57, 0.25);
-  border-radius: 4px;
+  background: rgba(223, 178, 57, 0.2);
+  border-radius: 9px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(223, 178, 57, 0.45);
+  background: rgba(223, 178, 57, 0.4);
 }
 
 /* Custom card entrance transition */
@@ -66,15 +99,20 @@ body {
     box-shadow: 0 0 0px 0 rgba(223, 178, 57, 0);
   }
   30% {
-    box-shadow: 0 0 20px 2px rgba(223, 178, 57, 0.35);
+    box-shadow: 0 0 25px 2px rgba(223, 178, 57, 0.3);
   }
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
   }
 }
 
 .animate-scan-card {
   animation: slideInGlow 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Gaming Border accents */
+.border-gradient-gold {
+  border-image: linear-gradient(to right, rgba(223,178,57,0) 0%, rgba(223,178,57,0.4) 50%, rgba(223,178,57,0) 100%) 1;
 }
