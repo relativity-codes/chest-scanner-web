@@ -65,6 +65,19 @@ interface PlayerContribution {
   epic: number;
   rare: number;
   common: number;
+  sources: Record<string, number>;
+  todayCount: number;
+  weeklyCount: number;
+}
+
+// Helper to calculate game day in UTC+10
+function getUTC10GameDayStr(date: Date): string {
+  const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
+  const d = new Date(utc10Time);
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `chests_${yyyy}-${mm}-${dd}`;
 }
 
 export default function Dashboard() {
@@ -75,18 +88,16 @@ export default function Dashboard() {
   // Premium Analytics & Filtering States
   const [filterSource, setFilterSource] = useState<string>("all");
   const [filterDateRange, setFilterDateRange] = useState<string>("all");
-  const [weeklyTarget, setWeeklyTarget] = useState<number>(20);
+  const [dailyTarget, setDailyTarget] = useState<number>(20);
+  const [weeklyTarget, setWeeklyTarget] = useState<number>(150);
+
+  const isDaily = filterDateRange === "today";
+  const activeTarget = isDaily ? dailyTarget : weeklyTarget;
+  const setActiveTarget = isDaily ? setDailyTarget : setWeeklyTarget;
+  const targetLabel = isDaily ? "Daily Target" : "Weekly Target";
+
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<string | null>(null);
 
-  // Helper to calculate game day in UTC+10
-  const getUTC10GameDayStr = (date: Date): string => {
-    const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
-    const d = new Date(utc10Time);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    return `chests_${yyyy}-${mm}-${dd}`;
-  };
 
   // Compute active filtered chests
   const getFilteredChests = () => {
@@ -132,52 +143,85 @@ export default function Dashboard() {
   const audioContextRef = useRef<AudioContext | null>(null);
 
 
-  const fetchInitialData = async () => {
+  const fetchChests = useCallback(async (dateRange: string) => {
     try {
-      const [chestsRes, whitelistRes, fixesRes, unknownsRes] = await Promise.all([
-        fetch("/api/chests"),
+      let url = "/api/chests";
+      if (dateRange === "today") {
+        const todayGameDayStr = getUTC10GameDayStr(new Date());
+        url = `/api/chests?gameDay=${encodeURIComponent(todayGameDayStr)}`;
+      }
+      const res = await fetch(url);
+      const chestsData = await res.json();
+      setRawChests(Array.isArray(chestsData) ? chestsData : []);
+    } catch (e) {
+      console.error("Failed to load chests:", e);
+    }
+  }, []);
+
+  const fetchInitialMetadata = async () => {
+    try {
+      const [whitelistRes, fixesRes, unknownsRes] = await Promise.all([
         fetch("/api/whitelist"),
         fetch("/api/player-fixes"),
         fetch("/api/unknown-players"),
       ]);
 
-      const chestsData = await chestsRes.json();
       const whitelistData = await whitelistRes.json();
       const fixesData = await fixesRes.json();
       const unknownsData = await unknownsRes.json();
 
-      setRawChests(Array.isArray(chestsData) ? chestsData : []);
       setPlayers(Array.isArray(whitelistData.players) ? whitelistData.players : []);
       setFixes(Array.isArray(fixesData) ? fixesData : []);
       setUnknownPlayers(Array.isArray(unknownsData) ? unknownsData : []);
     } catch (e) {
-      console.error("Failed to load initial dashboard datasets:", e);
+      console.error("Failed to load initial metadata:", e);
     }
   };
 
 
-  // Load Initial Data
+  // Load Initial Metadata on mount
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchInitialData();
+    fetchInitialMetadata();
   }, []);
+
+  // Fetch chests whenever filterDateRange changes
+  useEffect(() => {
+    fetchChests(filterDateRange);
+  }, [filterDateRange, fetchChests]);
 
   // Real-Time Player Contributions Aggregation
   const getPlayerContributions = () => {
-    const contributions: Record<string, { total: number; legendary: number; epic: number; rare: number; common: number }> = {};
+    const contributions: Record<string, {
+      total: number;
+      legendary: number;
+      epic: number;
+      rare: number;
+      common: number;
+      sources: Record<string, number>;
+      todayCount: number;
+      weeklyCount: number;
+    }> = {};
+
+    const now = new Date();
+    const todayGameDayStr = getUTC10GameDayStr(now);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     // Initialize whitelisted players with 0 stats
     players.forEach(p => {
-      contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0 };
+      contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0 };
     });
 
     // Aggregate drops from scanned chests
     chests.forEach((chest) => {
       const p = chest.fromPlayer || "Unknown";
       if (!contributions[p]) {
-        contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0 };
+        contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0 };
       }
       contributions[p].total += 1;
+
+      const src = chest.source || "Other";
+      contributions[p].sources[src] = (contributions[p].sources[src] || 0) + 1;
+
       const name = chest.chestName.toLowerCase();
       if (name.includes("legendary") || name.includes("gold")) {
         contributions[p].legendary += 1;
@@ -190,15 +234,33 @@ export default function Dashboard() {
       }
     });
 
+    // Populate todayCount and weeklyCount based on rawChests (overall scanning stats)
+    rawChests.forEach((chest) => {
+      const p = chest.fromPlayer || "Unknown";
+      if (!contributions[p]) return;
+
+      const chestDate = new Date(chest.time);
+      if (chest.gameDay === todayGameDayStr) {
+        contributions[p].todayCount += 1;
+      }
+      if (chestDate >= oneWeekAgo) {
+        contributions[p].weeklyCount += 1;
+      }
+    });
+
     return Object.entries(contributions)
       .map(([player, stats]) => ({ player, ...stats }))
       .sort((a, b) => b.total - a.total);
   };
 
   const handleExportCSV = (contributionsList: PlayerContribution[]) => {
-    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Total Drops", "Weekly Target Status"];
+    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Source Breakdown", "Total Drops", "Daily Target (20) Status", "Weekly Target (150) Status"];
     const rows = contributionsList.map((item, idx) => {
-      const statusText = item.total >= weeklyTarget ? "Target Met" : `${item.total}/${weeklyTarget}`;
+      const dailyStatus = item.todayCount >= dailyTarget ? "Target Met" : `${item.todayCount}/${dailyTarget}`;
+      const weeklyStatus = item.weeklyCount >= weeklyTarget ? "Target Met" : `${item.weeklyCount}/${weeklyTarget}`;
+      const sourceStr = Object.entries(item.sources || {})
+        .map(([src, count]) => `${src}: ${count}`)
+        .join(" | ");
       return [
         idx + 1,
         `"${item.player.replace(/"/g, '""')}"`,
@@ -206,8 +268,10 @@ export default function Dashboard() {
         item.epic,
         item.rare,
         item.common,
+        `"${sourceStr.replace(/"/g, '""')}"`,
         item.total,
-        `"${statusText}"`
+        `"${dailyStatus}"`,
+        `"${weeklyStatus}"`
       ];
     });
 
@@ -459,13 +523,13 @@ export default function Dashboard() {
   const rarityStats = getRarityStats();
 
   return (
-    <main className="min-h-screen bg-[#030307] text-[#f8fafc] font-sans antialiased p-4 md:p-8">
+    <main className="min-h-screen bg-[#030307] text-[#f8fafc] font-sans antialiased p-2.5 sm:p-4 md:p-8">
       {/* Background ambient lighting */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-amber-500/5 rounded-full blur-[150px] -z-10 pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-[120px] -z-10 pointer-events-none" />
 
       {/* TOP HEADER */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 glass-panel-glow p-6 rounded-2xl">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 md:mb-8 glass-panel-glow p-4 sm:p-6 rounded-xl sm:rounded-2xl">
         <div className="flex items-center gap-3">
           <div className="bg-gradient-to-br from-amber-400 to-amber-600 p-2.5 rounded-xl shadow-lg shadow-amber-500/10">
             <Flame className="w-6 h-6 text-[#030307] stroke-[2.5]" />
@@ -531,63 +595,63 @@ export default function Dashboard() {
       </header>
 
       {/* CORE STATISTICS CARDS */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="glass-panel p-5 rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 tracking-wider">TOTAL CHESTS LOGGED</span>
-          <div className="flex items-baseline gap-2 mt-2">
-            <span className="text-2xl md:text-3xl font-black text-slate-100">{totalChests}</span>
-            <span className="text-xs text-amber-500 font-semibold">scanned</span>
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 md:mb-8">
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CHESTS LOGGED</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{totalChests}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">scanned</span>
           </div>
-          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-            <Database className="w-3.5 h-3.5 text-amber-500/70" />
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Database className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
             <span>CockroachDB Active</span>
           </div>
         </div>
 
-        <div className="glass-panel p-5 rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 tracking-wider">ACTIVE SCANNERS</span>
-          <div className="flex items-baseline gap-2 mt-2">
-            <span className="text-2xl md:text-3xl font-black text-slate-100">{activeScanners}</span>
-            <span className="text-xs text-amber-500 font-semibold">players</span>
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">ACTIVE SCANNERS</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{activeScanners}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">players</span>
           </div>
-          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-            <Users className="w-3.5 h-3.5 text-amber-500/70" />
-            <span>Out of {players.length} whitelisted</span>
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
+            <span>Out of {players.length} active</span>
           </div>
         </div>
 
-        <div className="glass-panel p-5 rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 tracking-wider">DAILY SCAN RATE</span>
-          <div className="flex items-baseline gap-2 mt-2">
-            <span className="text-2xl md:text-3xl font-black text-slate-100">{dailyAverage}</span>
-            <span className="text-xs text-amber-500 font-semibold">chests/day</span>
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">DAILY SCAN RATE</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{dailyAverage}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests/day</span>
           </div>
-          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-            <Activity className="w-3.5 h-3.5 text-amber-500/70" />
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
             <span>Computed dynamically</span>
           </div>
         </div>
 
-        <div className="glass-panel p-5 rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 tracking-wider">MODERATION ALERTS</span>
-          <div className="flex items-baseline gap-2 mt-2">
-            <span className={`text-2xl md:text-3xl font-black ${unknownPlayers.length > 0 ? "text-rose-400" : "text-emerald-400"}`}>
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">MODERATION ALERTS</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className={`text-lg sm:text-2xl md:text-3xl font-black ${unknownPlayers.length > 0 ? "text-rose-400" : "text-emerald-400"}`}>
               {unknownPlayers.length}
             </span>
-            <span className="text-xs font-semibold text-slate-400">pending</span>
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-400">pending</span>
           </div>
-          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-            <ShieldAlert className={`w-3.5 h-3.5 ${unknownPlayers.length > 0 ? "text-rose-400" : "text-emerald-400"}`} />
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <ShieldAlert className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${unknownPlayers.length > 0 ? "text-rose-450" : "text-emerald-400"}`} />
             <span>Unknown names flagged</span>
           </div>
         </div>
       </section>
 
       {/* CORE NAVIGATION TABS */}
-      <div className="flex border-b border-slate-800/80 mb-6 gap-2">
+      <div className="flex border-b border-slate-800/80 mb-5 gap-1 overflow-x-auto scrollbar-none snap-x -mx-4 px-4 md:mx-0 md:px-0 whitespace-nowrap">
         <button
           onClick={() => setActiveTab("live")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "live"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "live"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
@@ -596,7 +660,7 @@ export default function Dashboard() {
         </button>
         <button
           onClick={() => setActiveTab("contributions")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "contributions"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "contributions"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
@@ -605,21 +669,21 @@ export default function Dashboard() {
         </button>
         <button
           onClick={() => setActiveTab("whitelist")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 flex items-center gap-1.5 ${activeTab === "whitelist"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "whitelist"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
         >
           Clan Whitelist
           {unknownPlayers.length > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">
+            <span className="bg-rose-500 text-white text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse flex-shrink-0">
               {unknownPlayers.length}
             </span>
           )}
         </button>
         <button
           onClick={() => setActiveTab("corrections")}
-          className={`pb-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === "corrections"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "corrections"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
@@ -632,10 +696,10 @@ export default function Dashboard() {
 
       {/* 1. TAB: LIVE SCANNER FEED */}
       {activeTab === "live" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
           {/* Main Feed Grid */}
-          <div className="lg:col-span-2 flex flex-col h-[650px] glass-panel rounded-2xl p-5 overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
+          <div className="lg:col-span-2 flex flex-col h-[500px] sm:h-[650px] glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden">
+            <div className="flex items-center justify-between mb-3.5 sm:mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
                 <span className="text-sm font-bold tracking-wide text-slate-200">REAL-TIME INGESTION CARDS</span>
@@ -660,7 +724,7 @@ export default function Dashboard() {
                         backgroundColor: style.bg,
                         borderColor: style.border
                       }}
-                      className={`border p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 ${index === 0 ? "animate-scan-card" : ""
+                      className={`border p-3 sm:p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 ${index === 0 ? "animate-scan-card" : ""
                         }`}
                     >
                       {/* Left Block */}
@@ -684,12 +748,12 @@ export default function Dashboard() {
                       <div className="flex md:flex-col items-end justify-between md:justify-center gap-2 text-right">
                         <div className="text-xs text-slate-300 font-medium">
                           {formatUTC10Time(chest.time)}
-                          <span className="text-[10px] text-slate-500 ml-1.5">
+                          <span className="text-[10px] text-slate-550 ml-1.5">
                             ({chest.gameDay})
                           </span>
                         </div>
                         {chest.originalTimer && (
-                          <div className="text-[10px] text-slate-500 font-mono">
+                          <div className="text-[10px] text-slate-550 font-mono">
                             OCR Timer: {chest.originalTimer}
                           </div>
                         )}
@@ -702,10 +766,10 @@ export default function Dashboard() {
           </div>
 
           {/* Right Metrics Panel */}
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-5 lg:gap-6">
             {/* Visual SVG Distribution Charts */}
-            <div className="glass-panel rounded-2xl p-5">
-              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-4 uppercase">CHEST QUALITY SHARE</h2>
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5">
+              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3.5 sm:mb-4 uppercase">CHEST QUALITY SHARE</h2>
 
               {chests.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-xs text-slate-500">
@@ -797,7 +861,7 @@ export default function Dashboard() {
             </div>
 
             {/* Top Contributor list */}
-            <div className="glass-panel rounded-2xl p-5 flex-1 overflow-hidden flex flex-col max-h-[350px]">
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex-1 overflow-hidden flex flex-col max-h-[350px]">
               <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">TOP ACTIVE SCANNERS</h2>
               <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
                 {chests.length === 0 ? (
@@ -844,58 +908,58 @@ export default function Dashboard() {
         const averageChestsPerPlayer = players.length > 0 ? (totalScanChests / players.length).toFixed(1) : "0.0";
 
         return (
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-5 lg:gap-6">
             {/* Highlights Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="glass-panel p-5 rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-xs font-semibold text-slate-400 tracking-wider">🏆 TOP PRODUCER</span>
-                <div className="flex items-baseline gap-2 mt-2">
-                  <span className="text-xl md:text-2xl font-black text-gold truncate max-w-[200px]">{topContributor}</span>
-                  <span className="text-xs text-amber-500 font-semibold">{topContributorCount} drops</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏆 TOP PRODUCER</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-lg md:text-2xl font-black text-gold truncate max-w-[140px] sm:max-w-[200px]">{topContributor}</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topContributorCount} drops</span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-                  <Flame className="w-3.5 h-3.5 text-amber-500" />
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
                   <span>Leads the ELF contribution board</span>
                 </div>
               </div>
 
-              <div className="glass-panel p-5 rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-xs font-semibold text-slate-400 tracking-wider">📊 AVERAGE CONTRIBUTION</span>
-                <div className="flex items-baseline gap-2 mt-2">
-                  <span className="text-2xl md:text-3xl font-black text-slate-100">{averageChestsPerPlayer}</span>
-                  <span className="text-xs text-amber-500 font-semibold">chests/member</span>
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">📊 AVERAGE CONTRIBUTION</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{averageChestsPerPlayer}</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests/member</span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-                  <BookOpen className="w-3.5 h-3.5 text-amber-500" />
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
                   <span>Calculated across active roster</span>
                 </div>
               </div>
 
-              <div className="glass-panel p-5 rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-xs font-semibold text-slate-400 tracking-wider">🏹 ACTIVE CONTRIBUTION RATE</span>
-                <div className="flex items-baseline gap-2 mt-2">
-                  <span className="text-2xl md:text-3xl font-black text-slate-100">
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏹 ACTIVE CONTRIBUTION RATE</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">
                     {contributionsList.filter(c => c.total > 0).length}
                   </span>
-                  <span className="text-xs text-slate-400">/ {players.length} members active</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} active</span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-3 text-[10px] text-slate-400">
-                  <Users className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Members with at least 1 registered drop</span>
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
+                  <span>At least 1 registered drop</span>
                 </div>
               </div>
             </div>
 
             {/* Leaderboard Grid */}
-            <div className="glass-panel rounded-2xl p-5 flex flex-col min-h-[450px]">
-              <div className="flex flex-col gap-2 mb-4">
-                <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
-                <p className="text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
+              <div className="flex flex-col gap-1.5 mb-3.5">
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
               </div>
 
-              <div className="flex flex-wrap gap-4 items-center justify-between mb-5 bg-slate-950/40 p-4 border border-slate-900 rounded-2xl">
+              <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
                 {/* Left side filters */}
-                <div className="flex flex-wrap gap-3 items-center text-xs">
+                <div className="flex flex-wrap gap-2.5 sm:gap-3 items-center text-[11px] sm:text-xs">
                   {/* Source filter */}
                   <div className="flex items-center gap-1.5">
                     <Filter className="w-3.5 h-3.5 text-amber-500" />
@@ -932,6 +996,18 @@ export default function Dashboard() {
                     </select>
                   </div>
 
+                  {/* Daily target input */}
+                  <div className="flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-slate-400 font-semibold">Daily Target:</span>
+                    <input
+                      type="number"
+                      value={dailyTarget || ""}
+                      onChange={(e) => setDailyTarget(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50 w-12 text-center font-bold"
+                    />
+                  </div>
+
                   {/* Weekly target input */}
                   <div className="flex items-center gap-1.5">
                     <Target className="w-3.5 h-3.5 text-amber-500" />
@@ -946,7 +1022,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Right side search + download */}
-                <div className="flex gap-2 items-center w-full md:w-auto">
+                <div className="flex gap-2 items-center w-full md:w-auto mt-2.5 md:mt-0">
                   <button
                     onClick={() => handleExportCSV(contributionsList)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
@@ -968,8 +1044,8 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Table */}
-              <div className="overflow-x-auto flex-1">
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-x-auto flex-1">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
@@ -978,8 +1054,10 @@ export default function Dashboard() {
                       <th className="py-3 px-4 text-center text-slate-400">Legendary 🥇</th>
                       <th className="py-3 px-4 text-center text-slate-400">Epic 🥈</th>
                       <th className="py-3 px-4 text-center text-slate-400">Rare/Crypt 🥉</th>
+                      <th className="py-3 px-4 text-center text-slate-400">Source Breakdown</th>
                       <th className="py-3 px-4 text-center font-bold text-gold text-slate-400">Total Drops</th>
-                      <th className="py-3 px-4 text-center text-slate-400 w-32">Target Progress</th>
+                      <th className="py-3 px-4 text-center text-slate-400 w-32">Daily Target ({dailyTarget})</th>
+                      <th className="py-3 px-4 text-center text-slate-400 w-32">Weekly Target ({weeklyTarget})</th>
                       <th className="py-3 px-4 w-40 text-slate-400">Status Level</th>
                     </tr>
                   </thead>
@@ -1038,22 +1116,58 @@ export default function Dashboard() {
                             <td className="py-3 px-4 text-center font-mono font-bold text-sky-400">
                               {item.rare > 0 ? `${item.rare}×` : "-"}
                             </td>
+                            <td className="py-3 px-4 text-center">
+                              <div className="flex flex-wrap justify-center gap-1.5 max-w-[200px] mx-auto">
+                                {Object.entries(item.sources || {}).map(([src, count]) => {
+                                  if (count === 0) return null;
+                                  let badgeStyle = "bg-slate-900 border-slate-800 text-slate-400";
+                                  if (src === "Monster") badgeStyle = "bg-rose-500/10 border-rose-500/20 text-rose-450";
+                                  else if (src === "Crypt") badgeStyle = "bg-sky-500/10 border-sky-500/20 text-sky-400";
+                                  else if (src === "PvP") badgeStyle = "bg-amber-500/10 border-amber-500/20 text-amber-400";
+                                  else if (src === "Clan") badgeStyle = "bg-emerald-500/10 border-emerald-500/20 text-emerald-450";
+                                  return (
+                                    <span key={src} className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeStyle}`}>
+                                      {src}: {count}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </td>
                             <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm bg-amber-500/5">
                               {item.total}
                             </td>
                             <td className="py-3 px-4 text-center">
-                              {item.total >= weeklyTarget ? (
+                              {item.todayCount >= dailyTarget ? (
                                 <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
                                   Met ✅
                                 </span>
                               ) : (
                                 <div className="flex flex-col items-center gap-1">
                                   <span className="text-[10px] text-slate-400 font-medium">
-                                    {item.total} / {weeklyTarget}
+                                    {item.todayCount} / {dailyTarget}
                                   </span>
                                   <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
                                     <div 
-                                      style={{ width: `${Math.min(100, Math.round((item.total / weeklyTarget) * 100))}%` }} 
+                                      style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }} 
+                                      className="bg-amber-500 h-full rounded-full" 
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {item.weeklyCount >= weeklyTarget ? (
+                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                  Met ✅
+                                </span>
+                              ) : (
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    {item.weeklyCount} / {weeklyTarget}
+                                  </span>
+                                  <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
+                                    <div 
+                                      style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }} 
                                       className="bg-amber-500 h-full rounded-full" 
                                     />
                                   </div>
@@ -1071,6 +1185,131 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Mobile Card List View */}
+              <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
+                {contributionsList
+                  .filter(item => item.player.toLowerCase().includes(playerSearchQuery.toLowerCase()))
+                  .map((item, idx) => {
+                    let rankBadge = "";
+                    if (idx === 0) rankBadge = "🥇";
+                    else if (idx === 1) rankBadge = "🥈";
+                    else if (idx === 2) rankBadge = "🥉";
+
+                    let statusText = "Recruit";
+                    let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
+                    if (item.total >= 30) {
+                      statusText = "Elite Raider";
+                      statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
+                    } else if (item.total >= 15) {
+                      statusText = "Heavy Raider";
+                      statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
+                    } else if (item.total >= 5) {
+                      statusText = "Active Member";
+                      statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
+                    } else if (item.total > 0) {
+                      statusText = "Contributor";
+                      statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
+                    }
+
+                    return (
+                      <div key={item.player} className="p-3 sm:p-4 bg-slate-950/45 border border-slate-900 rounded-xl sm:rounded-2xl space-y-2.5 sm:space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-slate-400 font-bold w-5 text-xs sm:text-sm">
+                              {rankBadge || `#${idx + 1}`}
+                            </span>
+                            <button
+                              onClick={() => setSelectedPlayerDetail(item.player)}
+                              className="font-bold text-slate-200 hover:text-gold hover:underline text-xs sm:text-sm text-left"
+                            >
+                              {item.player}
+                            </button>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full border text-[9px] sm:text-[10px] font-bold ${statusColor}`}>
+                            {statusText}
+                          </span>
+                        </div>
+
+                        {/* Stats grid */}
+                        <div className="grid grid-cols-4 gap-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Leg 🥇</span>
+                            <span className="font-mono font-bold text-amber-400">{item.legendary}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Epic 🥈</span>
+                            <span className="font-mono font-bold text-purple-400">{item.epic}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rare 🥉</span>
+                            <span className="font-mono font-bold text-sky-400">{item.rare}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Total 🏆</span>
+                            <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
+                          </div>
+                        </div>
+
+                        {/* Source breakdown */}
+                        {Object.keys(item.sources).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {Object.entries(item.sources).map(([src, count]) => {
+                              if (count === 0) return null;
+                              let badgeStyle = "bg-slate-900 border-slate-800 text-slate-400";
+                              if (src === "Monster") badgeStyle = "bg-rose-500/10 border-rose-500/20 text-rose-450";
+                              else if (src === "Crypt") badgeStyle = "bg-sky-500/10 border-sky-500/20 text-sky-400";
+                              else if (src === "PvP") badgeStyle = "bg-amber-500/10 border-amber-500/20 text-amber-400";
+                              else if (src === "Clan") badgeStyle = "bg-emerald-500/10 border-emerald-500/20 text-emerald-450";
+                              return (
+                                <span key={src} className={`px-1.5 py-0.5 rounded border text-[8.5px] font-bold ${badgeStyle}`}>
+                                  {src}: {count}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Progress Bars (Compact Side-by-Side) */}
+                        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-900/40 text-[9px] sm:text-[10px]">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-medium">Daily ({dailyTarget})</span>
+                              {item.todayCount >= dailyTarget ? (
+                                <span className="font-bold text-emerald-400">Met ✅</span>
+                              ) : (
+                                <span className="text-slate-350 font-semibold">{item.todayCount}/{dailyTarget}</span>
+                              )}
+                            </div>
+                            <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
+                              <div
+                                style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }}
+                                className="bg-amber-500 h-full rounded-full"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-medium">Weekly ({weeklyTarget})</span>
+                              {item.weeklyCount >= weeklyTarget ? (
+                                <span className="font-bold text-emerald-400">Met ✅</span>
+                              ) : (
+                                <span className="text-slate-350 font-semibold">{item.weeklyCount}/{weeklyTarget}</span>
+                              )}
+                            </div>
+                            <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
+                              <div
+                                style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }}
+                                className="bg-amber-500 h-full rounded-full"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           </div>
         );
@@ -1078,9 +1317,9 @@ export default function Dashboard() {
 
       {/* 2. TAB: CLAN WHITELIST */}
       {activeTab === "whitelist" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
           {/* Main Roster Panel */}
-          <div className="lg:col-span-2 glass-panel rounded-2xl p-5 flex flex-col h-[550px] overflow-hidden">
+          <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">CLAN MEMBER ROSTER ({players.length})</h2>
@@ -1088,29 +1327,29 @@ export default function Dashboard() {
               </div>
 
               {/* Add and Search inputs */}
-              <div className="flex gap-2">
-                <div className="relative">
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <div className="relative w-full sm:w-auto">
                   <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                   <input
                     type="text"
                     placeholder="Search roster..."
                     value={playerSearchQuery}
                     onChange={(e) => setPlayerSearchQuery(e.target.value)}
-                    className="pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-44"
+                    className="pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-44"
                   />
                 </div>
 
-                <div className="flex gap-1.5">
+                <div className="flex gap-1.5 w-full sm:w-auto">
                   <input
                     type="text"
                     placeholder="Add player tag..."
                     value={newPlayerName}
                     onChange={(e) => setNewPlayerName(e.target.value)}
-                    className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-36"
+                    className="flex-1 sm:flex-none px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-36"
                   />
                   <button
                     onClick={() => handleAddPlayer(newPlayerName)}
-                    className="p-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all"
+                    className="p-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all flex-shrink-0"
                   >
                     <Plus className="w-4 h-4 stroke-[3]" />
                   </button>
@@ -1134,7 +1373,7 @@ export default function Dashboard() {
                       <span className="font-semibold text-slate-200 truncate">{player}</span>
                       <button
                         onClick={() => handleDeletePlayer(player)}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all"
                         title="Remove from roster"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1147,7 +1386,7 @@ export default function Dashboard() {
           </div>
 
           {/* Right Moderation Queue Panel */}
-          <div className="glass-panel rounded-2xl p-5 flex flex-col h-[550px] overflow-hidden border-rose-500/15">
+          <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[400px] sm:h-[550px] overflow-hidden border-rose-500/15">
             <div className="flex items-center gap-2 mb-2">
               <ShieldAlert className="w-5 h-5 text-rose-400" />
               <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">MODERATION QUEUE</h2>
@@ -1217,9 +1456,9 @@ export default function Dashboard() {
 
       {/* 3. TAB: OCR CORRECTIONS */}
       {activeTab === "corrections" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
           {/* Main Corrections List */}
-          <div className="lg:col-span-2 glass-panel rounded-2xl p-5 flex flex-col h-[550px] overflow-hidden">
+          <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
             <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide mb-1">OCR CORRECTIONS DICTIONARY ({fixes.length})</h2>
             <p className="text-xs text-slate-400 mb-5 leading-normal">
               Corrects common character-swapping and OCR noise. Scanned variants in the left column will automatically resolve to the whitelisted tag on the right.
@@ -1245,7 +1484,7 @@ export default function Dashboard() {
 
                       <button
                         onClick={() => handleDeleteFix(fix.ocrName)}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all flex-shrink-0"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all flex-shrink-0"
                         title="Delete correction mapping"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1258,7 +1497,7 @@ export default function Dashboard() {
           </div>
 
           {/* Right Add Corrections Form */}
-          <div className="glass-panel rounded-2xl p-5 flex flex-col h-[320px]">
+          <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[320px]">
             <div className="flex items-center gap-2 mb-3">
               <BookOpen className="w-5 h-5 text-amber-500" />
               <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">ADD CORRECTION</h2>
@@ -1302,7 +1541,7 @@ export default function Dashboard() {
       {selectedPlayerDetail && (() => {
         const contributionsList = getPlayerContributions();
         const playerStats = contributionsList.find(c => c.player === selectedPlayerDetail) || {
-          player: selectedPlayerDetail, total: 0, legendary: 0, epic: 0, rare: 0, common: 0
+          player: selectedPlayerDetail, total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0
         };
         const playerChests = chests.filter(c => c.fromPlayer === selectedPlayerDetail).slice(0, 10);
         
@@ -1330,22 +1569,22 @@ export default function Dashboard() {
         }
 
         return (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-            <div className="glass-panel max-w-lg w-full rounded-2xl p-6 relative border-amber-500/20 max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in">
+            <div className="glass-panel max-w-lg w-full rounded-xl sm:rounded-2xl p-4 sm:p-6 relative border-amber-500/20 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
               <button 
                 onClick={() => setSelectedPlayerDetail(null)}
-                className="absolute top-4 right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-all"
+                className="absolute top-3 right-3 sm:top-4 sm:right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-5 sm:mb-6">
                 <div className="bg-gradient-to-br from-amber-400 to-amber-600 p-2.5 rounded-xl">
-                  <Users className="w-6 h-6 text-[#030307]" />
+                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-[#030307]" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-slate-100">{selectedPlayerDetail}</h2>
+                    <h2 className="text-lg sm:text-xl font-bold text-slate-100">{selectedPlayerDetail}</h2>
                     <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold ${statusColor}`}>
                       {statusText}
                     </span>
@@ -1355,16 +1594,23 @@ export default function Dashboard() {
               </div>
 
               {/* Rarity breakdown */}
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-slate-950/50 border border-slate-900 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-550 font-bold uppercase">Total Scanned</span>
-                  <p className="text-2xl font-black text-slate-100 mt-1">{playerStats.total}</p>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5 sm:mb-6 text-center">
+                <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Total Scanned</span>
+                  <p className="text-base sm:text-xl font-black text-slate-100 mt-0.5 sm:mt-1">{playerStats.total}</p>
                 </div>
-                <div className="bg-slate-950/50 border border-slate-900 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-550 font-bold uppercase">Target Progress</span>
-                  <p className="text-lg font-black text-gold mt-1">
-                    {playerStats.total} / {weeklyTarget}
-                    <span className="text-xs text-slate-450 ml-1">({Math.min(100, Math.round((playerStats.total / weeklyTarget) * 100))}%)</span>
+                <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Daily Target</span>
+                  <p className="text-xs sm:text-sm font-black text-gold mt-0.5 sm:mt-1">
+                    {playerStats.todayCount} / {dailyTarget}
+                    <span className="text-[9px] sm:text-[10px] text-slate-450 block mt-0.5">({Math.min(100, Math.round((playerStats.todayCount / dailyTarget) * 100))}%)</span>
+                  </p>
+                </div>
+                <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Weekly Target</span>
+                  <p className="text-xs sm:text-sm font-black text-gold mt-0.5 sm:mt-1">
+                    {playerStats.weeklyCount} / {weeklyTarget}
+                    <span className="text-[9px] sm:text-[10px] text-slate-450 block mt-0.5">({Math.min(100, Math.round((playerStats.weeklyCount / weeklyTarget) * 100))}%)</span>
                   </p>
                 </div>
               </div>

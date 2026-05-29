@@ -18,12 +18,27 @@ function getUTC10GameDay(date: Date): string {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const limit = parseInt(searchParams.get("limit") || "1000");
+    const limitParam = searchParams.get("limit");
+    const gameDay = searchParams.get("gameDay");
 
-    const chests = await db.chest.findMany({
+    const where: any = {};
+    if (gameDay) {
+      where.gameDay = gameDay;
+    }
+
+    const queryOptions: any = {
+      where,
       orderBy: { time: "desc" },
-      take: limit,
-    });
+    };
+
+    if (limitParam && limitParam !== "all") {
+      const parsedLimit = parseInt(limitParam);
+      if (!isNaN(parsedLimit)) {
+        queryOptions.take = parsedLimit;
+      }
+    }
+
+    const chests = await db.chest.findMany(queryOptions);
 
     return NextResponse.json(chests);
   } catch (error: any) {
