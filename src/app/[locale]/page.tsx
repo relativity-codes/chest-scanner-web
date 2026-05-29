@@ -212,6 +212,7 @@ const CircularProgress = ({ percent, color, label, count }: { percent: number; c
 
 export default function Dashboard() {
   const t = useTranslations('Dashboard');
+  const clanName = process.env.NEXT_PUBLIC_CLAN_NAME ?? 'ELF';
   const [rawChests, setRawChests] = useState<Chest[]>([]);
   const [players, setPlayers] = useState<string[]>([]);
 
@@ -404,7 +405,7 @@ export default function Dashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `elf_clan_chest_contributions_${filterDateRange}_${filterSource}.csv`);
+    link.setAttribute("download", `${clanName.toLowerCase()}_clan_chest_contributions_${filterDateRange}_${filterSource}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -728,7 +729,7 @@ export default function Dashboard() {
             <Flame className="w-6 h-6 text-[#030307] stroke-[2.5]" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold font-cinzel uppercase tracking-wider">{t('title')}</h1>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gold font-cinzel uppercase tracking-wider">{t('title', { clanName })}</h1>
             <p className="text-xs text-slate-400 font-medium tracking-wide">{t('subtitle')}</p>
           </div>
         </div>
@@ -1080,7 +1081,7 @@ export default function Dashboard() {
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>Leads the ELF contribution board</span>
+                  <span>Leads the {clanName} contribution board</span>
                 </div>
               </div>
 
@@ -1114,7 +1115,7 @@ export default function Dashboard() {
             {/* Leaderboard Grid */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
               <div className="flex flex-col gap-1.5 mb-3.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">🏆 ELF MEMBER CONTRIBUTIONS LEADERBOARD</h2>
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">🏆 {clanName} MEMBER CONTRIBUTIONS LEADERBOARD</h2>
                 <p className="text-[11px] sm:text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
               </div>
 
@@ -1713,7 +1714,7 @@ export default function Dashboard() {
                       {statusText}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400">ELF Clan Member Stats</p>
+                  <p className="text-xs text-slate-400">{clanName} Clan Member Stats</p>
                 </div>
               </div>
 
