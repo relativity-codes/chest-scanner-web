@@ -22,7 +22,8 @@ import {
   Target,
   X,
   MessageCircle,
-  MessageSquare
+  MessageSquare,
+  Gem
 } from "lucide-react";
 
 interface Chest {
@@ -755,6 +756,19 @@ export default function Dashboard() {
     return rawChests.filter((c) => c.gameDay === todayGameDayStr).length;
   }, [rawChests]);
 
+  // Total Clan Wealth points across all chests in rawChests
+  const totalWealth = useMemo(() => {
+    return rawChests.reduce((sum, chest) => sum + calculateChestPoints(chest.chestName, chest.source), 0);
+  }, [rawChests]);
+
+  // Today's Clan Wealth points across chests scanned today
+  const todayWealth = useMemo(() => {
+    const todayGameDayStr = getUTC10GameDayStr(new Date());
+    return rawChests
+      .filter((c) => c.gameDay === todayGameDayStr)
+      .reduce((sum, chest) => sum + calculateChestPoints(chest.chestName, chest.source), 0);
+  }, [rawChests]);
+
   // Whitelist filtering
   const filteredPlayers = players.filter((p) =>
     p.toLowerCase().includes(playerSearchQuery.toLowerCase())
@@ -910,7 +924,7 @@ export default function Dashboard() {
       </header>
 
       {/* CORE STATISTICS CARDS */}
-      <section className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6 md:mb-8">
+      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-4 mb-6 md:mb-8">
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
           <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CHESTS LOGGED</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
@@ -920,6 +934,19 @@ export default function Dashboard() {
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Database className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
             <span>CockroachDB Active</span>
+          </div>
+        </div>
+
+        {/* CLAN WEALTH CARD */}
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CLAN WEALTH</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{totalWealth.toLocaleString()}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">points</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Gem className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
+            <span>Accumulated wealth 💎</span>
           </div>
         </div>
 
@@ -950,13 +977,13 @@ export default function Dashboard() {
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
           <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">MODERATION ALERTS</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-            <span className={`text-lg sm:text-2xl md:text-3xl font-black ${unknownPlayers.length > 0 ? "text-rose-400" : "text-emerald-400"}`}>
+            <span className={`text-lg sm:text-2xl md:text-3xl font-black ${unknownPlayers.length > 0 ? "text-rose-500" : "text-emerald-400"}`} style={{ color: unknownPlayers.length > 0 ? "rgb(248, 113, 113)" : "rgb(52, 211, 153)" }}>
               {unknownPlayers.length}
             </span>
             <span className="text-[10px] sm:text-xs font-semibold text-slate-400">pending</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
-            <ShieldAlert className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${unknownPlayers.length > 0 ? "text-rose-450" : "text-emerald-400"}`} />
+            <ShieldAlert className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${unknownPlayers.length > 0 ? "text-rose-500" : "text-emerald-400"}`} />
             <span>Unknown names flagged</span>
           </div>
         </div>
@@ -970,6 +997,19 @@ export default function Dashboard() {
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
             <span>UTC+10 game day</span>
+          </div>
+        </div>
+
+        {/* TODAY'S WEALTH CARD */}
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TODAY&apos;S WEALTH</span>
+          <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+            <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{todayWealth.toLocaleString()}</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">points</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+            <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
+            <span>Today&apos;s active wealth 🔥</span>
           </div>
         </div>
       </section>
