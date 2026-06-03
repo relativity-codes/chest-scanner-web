@@ -46,6 +46,74 @@ function formatUTC10Time(dateInput: string | Date): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function parseChestLevel(chestName: string, source: string): number {
+  const cn = chestName.toLowerCase();
+  const src = (source || "").toLowerCase();
+  const fullText = `${cn} ${src}`;
+
+  let level = 0;
+  const levelRegex = /(?:level|lvl|lvl\.|level\.)\s*(\d+)/i;
+  const match = fullText.match(levelRegex);
+  if (match) {
+    level = parseInt(match[1], 10);
+  } else {
+    const numMatch = fullText.match(/\b(5|10|15|20|25|30|35)\b/);
+    if (numMatch) {
+      level = parseInt(numMatch[1], 10);
+    }
+  }
+  return level;
+}
+
+function calculateChestPoints(chestName: string, source: string): number {
+  const cn = chestName.toLowerCase();
+  const src = (source || "").toLowerCase();
+  const fullText = `${cn} ${src}`;
+
+  const level = parseChestLevel(chestName, source);
+
+  // 2. Identify Category
+  const isLegendary = cn.includes("legendary") || cn.includes("gold");
+  const isCitadel = fullText.includes("citadel");
+  const isEpic = fullText.includes("epic") || fullText.includes("dragon");
+  const isRare = fullText.includes("rare") || cn.includes("minotaur") || cn.includes("wyvern");
+
+  if (isLegendary) {
+    return 1500;
+  }
+
+  if (isEpic) {
+    if (level <= 15) return 75;
+    if (level <= 20) return 598;
+    if (level <= 25) return 1000;
+    if (level <= 30) return 1184;
+    return 1484; // level 35
+  }
+
+  if (isRare) {
+    if (level <= 10) return 66;
+    if (level <= 15) return 130;
+    if (level <= 20) return 319;
+    if (level <= 25) return 800;
+    return 1200; // level 30
+  }
+
+  if (isCitadel) {
+    if (level <= 10) return 18;
+    if (level <= 15) return 30;
+    if (level <= 20) return 50;
+    if (level <= 25) return 120;
+    return 200; // level 30
+  }
+
+  // Fallback to Common Crypt
+  if (level <= 5) return 13;
+  if (level <= 10) return 35;
+  if (level <= 15) return 75;
+  if (level <= 20) return 167;
+  return 550; // level 25
+}
+
 interface PlayerFix {
   id: string;
   ocrName: string;
@@ -58,13 +126,20 @@ interface UnknownPlayer {
   encountered: string;
 }
 
+interface ChestTypeStats {
+  total: number;
+  levels: Record<number, number>;
+}
+
 interface PlayerContribution {
   player: string;
   total: number;
-  legendary: number;
-  epic: number;
-  rare: number;
-  common: number;
+  points: number;
+  epicCrypt: ChestTypeStats;
+  rareCrypt: ChestTypeStats;
+  commonCrypt: ChestTypeStats;
+  citadel: ChestTypeStats;
+  other: ChestTypeStats;
   sources: Record<string, number>;
   todayCount: number;
   weeklyCount: number;
@@ -320,12 +395,16 @@ export default function Dashboard() {
 
   // Real-Time Player Contributions Aggregation
   const contributionsList = useMemo(() => {
+    const createEmptyStats = (): ChestTypeStats => ({ total: 0, levels: {} });
+
     const contributions: Record<string, {
       total: number;
-      legendary: number;
-      epic: number;
-      rare: number;
-      common: number;
+      points: number;
+      epicCrypt: ChestTypeStats;
+      rareCrypt: ChestTypeStats;
+      commonCrypt: ChestTypeStats;
+      citadel: ChestTypeStats;
+      other: ChestTypeStats;
       sources: Record<string, number>;
       todayCount: number;
       weeklyCount: number;
@@ -335,31 +414,68 @@ export default function Dashboard() {
     const todayGameDayStr = getUTC10GameDayStr(now);
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
+    const initPlayerStats = () => ({
+      total: 0,
+      points: 0,
+      epicCrypt: createEmptyStats(),
+      rareCrypt: createEmptyStats(),
+      commonCrypt: createEmptyStats(),
+      citadel: createEmptyStats(),
+      other: createEmptyStats(),
+      sources: {},
+      todayCount: 0,
+      weeklyCount: 0
+    });
+
     // Initialize whitelisted players with 0 stats
     players.forEach(p => {
-      contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0 };
+      contributions[p] = initPlayerStats();
     });
 
     // Aggregate drops from scanned chests
     chests.forEach((chest) => {
       const p = chest.fromPlayer || "Unknown";
       if (!contributions[p]) {
-        contributions[p] = { total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0 };
+        contributions[p] = initPlayerStats();
       }
       contributions[p].total += 1;
+
+      // Calculate score points (Clan Wealth)
+      const pts = calculateChestPoints(chest.chestName, chest.source);
+      contributions[p].points += pts;
 
       const src = chest.source || "Other";
       contributions[p].sources[src] = (contributions[p].sources[src] || 0) + 1;
 
-      const name = chest.chestName.toLowerCase();
-      if (name.includes("legendary") || name.includes("gold")) {
-        contributions[p].legendary += 1;
-      } else if (name.includes("epic")) {
-        contributions[p].epic += 1;
-      } else if (name.includes("rare") || name.includes("crypt")) {
-        contributions[p].rare += 1;
+      const cn = chest.chestName.toLowerCase();
+      const fullText = `${cn} ${(chest.source || "").toLowerCase()}`;
+
+      const isCitadel = fullText.includes("citadel");
+      const isEpic = fullText.includes("epic") || fullText.includes("dragon");
+      const isRare = fullText.includes("rare") || cn.includes("minotaur") || cn.includes("wyvern");
+      const isCommon = fullText.includes("common") || 
+                       cn.includes("troll") || 
+                       cn.includes("sphinx") || 
+                       cn.includes("gorgon") || 
+                       (fullText.includes("crypt") && !isEpic && !isRare);
+
+      const level = parseChestLevel(chest.chestName, chest.source);
+
+      if (isEpic) {
+        contributions[p].epicCrypt.total += 1;
+        contributions[p].epicCrypt.levels[level] = (contributions[p].epicCrypt.levels[level] || 0) + 1;
+      } else if (isRare) {
+        contributions[p].rareCrypt.total += 1;
+        contributions[p].rareCrypt.levels[level] = (contributions[p].rareCrypt.levels[level] || 0) + 1;
+      } else if (isCitadel) {
+        contributions[p].citadel.total += 1;
+        contributions[p].citadel.levels[level] = (contributions[p].citadel.levels[level] || 0) + 1;
+      } else if (isCommon) {
+        contributions[p].commonCrypt.total += 1;
+        contributions[p].commonCrypt.levels[level] = (contributions[p].commonCrypt.levels[level] || 0) + 1;
       } else {
-        contributions[p].common += 1;
+        contributions[p].other.total += 1;
+        contributions[p].other.levels[level] = (contributions[p].other.levels[level] || 0) + 1;
       }
     });
 
@@ -379,22 +495,27 @@ export default function Dashboard() {
 
     return Object.entries(contributions)
       .map(([player, stats]) => ({ player, ...stats }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a, b) => b.points - a.points || b.total - a.total);
   }, [chests, rawChests, players, dailyTarget, weeklyTarget]);
 
   const handleExportCSV = (contributionsList: PlayerContribution[]) => {
-    const headers = ["Rank", "Player Name", "Legendary (Gold)", "Epic (Dragon)", "Rare (Crypt)", "Common", "Total Drops", "Daily Target (20) Status", "Weekly Target (150) Status"];
+    const headers = [
+      "Rank", "Player Name", "Epic Crypt", "Rare Crypt", "Common Crypt", "Citadel", "Other",
+      "Total Drops", "Clan Wealth", "Daily Target (20) Status", "Weekly Target (150) Status"
+    ];
     const rows = contributionsList.map((item, idx) => {
       const dailyStatus = item.todayCount >= dailyTarget ? "Target Met" : `${item.todayCount}/${dailyTarget}`;
       const weeklyStatus = item.weeklyCount >= weeklyTarget ? "Target Met" : `${item.weeklyCount}/${weeklyTarget}`;
       return [
         idx + 1,
         `"${item.player.replace(/"/g, '""')}"`,
-        item.legendary,
-        item.epic,
-        item.rare,
-        item.common,
+        item.epicCrypt.total,
+        item.rareCrypt.total,
+        item.commonCrypt.total,
+        item.citadel.total,
+        item.other.total,
         item.total,
+        item.points,
         `"${dailyStatus}"`,
         `"${weeklyStatus}"`
       ];
@@ -1065,7 +1186,7 @@ export default function Dashboard() {
       {activeTab === "contributions" && (() => {
         // contributionsList is already memoized above
         const topContributor = contributionsList[0]?.player || "None";
-        const topContributorCount = contributionsList[0]?.total || 0;
+        const topContributorPoints = contributionsList[0]?.points || 0;
         const totalScanChests = chests.length;
         const averageChestsPerPlayer = players.length > 0 ? (totalScanChests / players.length).toFixed(1) : "0.0";
 
@@ -1077,7 +1198,7 @@ export default function Dashboard() {
                 <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏆 TOP PRODUCER</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-lg md:text-2xl font-black text-gold truncate max-w-[140px] sm:max-w-[200px]">{topContributor}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topContributorCount} drops</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topContributorPoints.toLocaleString()} wealth</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
@@ -1213,9 +1334,12 @@ export default function Dashboard() {
                     <tr className="border-b border-slate-850 text-slate-450 font-bold uppercase tracking-wider font-cinzel">
                       <th className="py-3 px-4 w-16 text-slate-450">Rank</th>
                       <th className="py-3 px-4 text-slate-455">Player Name</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Legendary 🥇</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Epic 🥈</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Rare/Crypt 🥉</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Epic Crypt 🐉</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Rare Crypt 💀</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Common Crypt 📦</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Citadel 🏰</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Other 🌀</th>
+                      <th className="py-3 px-4 text-center font-bold text-amber-500 text-slate-455">Clan Wealth 💎</th>
                       <th className="py-3 px-4 text-center font-bold text-gold text-slate-455">Total Drops</th>
                       <th className="py-3 px-4 text-center text-slate-455 w-32">Daily Target ({dailyTarget})</th>
                       <th className="py-3 px-4 text-center text-slate-455 w-32">Weekly Target ({weeklyTarget})</th>
@@ -1268,16 +1392,115 @@ export default function Dashboard() {
                                 {item.player}
                               </button>
                             </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-amber-400">
-                              {item.legendary > 0 ? `${item.legendary}×` : "-"}
+                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-purple-400">
+                              {item.epicCrypt.total > 0 ? (
+                                <>
+                                  <span className="cursor-help border-b border-purple-500/25 hover:border-purple-400 transition-all">
+                                    {item.epicCrypt.total}×
+                                  </span>
+                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                      <span className="font-bold text-[9px] text-purple-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Epic Levels</span>
+                                      {Object.entries(item.epicCrypt.levels)
+                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                        .map(([lvl, count]) => (
+                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-purple-300">{count}</strong></span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-700">-</span>
+                              )}
                             </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-purple-400">
-                              {item.epic > 0 ? `${item.epic}×` : "-"}
+                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-sky-400">
+                              {item.rareCrypt.total > 0 ? (
+                                <>
+                                  <span className="cursor-help border-b border-sky-500/25 hover:border-sky-400 transition-all">
+                                    {item.rareCrypt.total}×
+                                  </span>
+                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                      <span className="font-bold text-[9px] text-sky-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Rare Levels</span>
+                                      {Object.entries(item.rareCrypt.levels)
+                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                        .map(([lvl, count]) => (
+                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-sky-300">{count}</strong></span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-700">-</span>
+                              )}
                             </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-sky-400">
-                              {item.rare > 0 ? `${item.rare}×` : "-"}
+                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-emerald-400">
+                              {item.commonCrypt.total > 0 ? (
+                                <>
+                                  <span className="cursor-help border-b border-emerald-500/25 hover:border-emerald-400 transition-all">
+                                    {item.commonCrypt.total}×
+                                  </span>
+                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                      <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Common Levels</span>
+                                      {Object.entries(item.commonCrypt.levels)
+                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                        .map(([lvl, count]) => (
+                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-emerald-300">{count}</strong></span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-700">-</span>
+                              )}
                             </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm bg-amber-500/5">
+                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-cyan-400">
+                              {item.citadel.total > 0 ? (
+                                <>
+                                  <span className="cursor-help border-b border-cyan-500/25 hover:border-cyan-400 transition-all">
+                                    {item.citadel.total}×
+                                  </span>
+                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                      <span className="font-bold text-[9px] text-cyan-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Citadel Levels</span>
+                                      {Object.entries(item.citadel.levels)
+                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                        .map(([lvl, count]) => (
+                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-cyan-300">{count}</strong></span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-700">-</span>
+                              )}
+                            </td>
+                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-slate-400">
+                              {item.other.total > 0 ? (
+                                <>
+                                  <span className="cursor-help border-b border-slate-500/25 hover:border-slate-400 transition-all">
+                                    {item.other.total}×
+                                  </span>
+                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                      <span className="font-bold text-[9px] text-slate-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Other Levels</span>
+                                      {Object.entries(item.other.levels)
+                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                        .map(([lvl, count]) => (
+                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-slate-350">{count}</strong></span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-700">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-center font-mono font-bold text-amber-500 text-sm bg-amber-500/5 font-black">
+                              {item.points.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm">
                               {item.total}
                             </td>
                             <td className="py-3 px-4 text-center">
@@ -1376,22 +1599,34 @@ export default function Dashboard() {
                         </div>
 
                         {/* Stats grid */}
-                        <div className="grid grid-cols-4 gap-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
+                        <div className="grid grid-cols-4 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Leg 🥇</span>
-                            <span className="font-mono font-bold text-amber-400">{item.legendary}</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Epic 🐉</span>
+                            <span className="font-mono font-bold text-purple-400">{item.epicCrypt.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Epic 🥈</span>
-                            <span className="font-mono font-bold text-purple-400">{item.epic}</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rare 💀</span>
+                            <span className="font-mono font-bold text-sky-400">{item.rareCrypt.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rare 🥉</span>
-                            <span className="font-mono font-bold text-sky-400">{item.rare}</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Com 📦</span>
+                            <span className="font-mono font-bold text-emerald-400">{item.commonCrypt.total}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Citadel 🏰</span>
+                            <span className="font-mono font-bold text-cyan-400">{item.citadel.total}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Other 🌀</span>
+                            <span className="font-mono font-bold text-slate-500">{item.other.total}</span>
                           </div>
                           <div>
                             <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Total 🏆</span>
                             <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Wealth 💎</span>
+                            <span className="font-mono font-bold text-amber-500 text-xs">{item.points.toLocaleString()}</span>
                           </div>
                         </div>
 
@@ -1666,7 +1901,17 @@ export default function Dashboard() {
       {selectedPlayerDetail && (() => {
         // contributionsList is already memoized above
         const playerStats = contributionsList.find(c => c.player === selectedPlayerDetail) || {
-          player: selectedPlayerDetail, total: 0, legendary: 0, epic: 0, rare: 0, common: 0, sources: {}, todayCount: 0, weeklyCount: 0
+          player: selectedPlayerDetail,
+          total: 0,
+          points: 0,
+          epicCrypt: { total: 0, levels: {} },
+          rareCrypt: { total: 0, levels: {} },
+          commonCrypt: { total: 0, levels: {} },
+          citadel: { total: 0, levels: {} },
+          other: { total: 0, levels: {} },
+          sources: {},
+          todayCount: 0,
+          weeklyCount: 0
         };
         const playerChests = chests.filter(c => c.fromPlayer === selectedPlayerDetail).slice(0, 10);
         
@@ -1719,10 +1964,14 @@ export default function Dashboard() {
               </div>
 
               {/* Rarity breakdown */}
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5 sm:mb-6 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5 sm:mb-6 text-center">
+                <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Clan Wealth</span>
+                  <p className="text-base sm:text-lg font-black text-amber-500 mt-0.5 sm:mt-1">{playerStats.points.toLocaleString()} 💎</p>
+                </div>
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
                   <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Total Scanned</span>
-                  <p className="text-base sm:text-xl font-black text-slate-100 mt-0.5 sm:mt-1">{playerStats.total}</p>
+                  <p className="text-base sm:text-lg font-black text-slate-100 mt-0.5 sm:mt-1">{playerStats.total}</p>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
                   <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Daily Target</span>
@@ -1746,46 +1995,111 @@ export default function Dashboard() {
                 {playerStats.total === 0 ? (
                   <p className="text-xs text-slate-500">No scanned chests recorded for this player.</p>
                 ) : (
-                  <div className="flex flex-col gap-2 text-xs">
-                    {/* Legendary */}
+                  <div className="flex flex-col gap-3 text-xs">
+                    {/* Epic Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-gold">Legendary/Gold</span>
-                        <span className="text-slate-400">{playerStats.legendary} ({Math.round((playerStats.legendary / playerStats.total) * 100)}%)</span>
+                        <span className="font-bold text-purple-400">Epic Crypt</span>
+                        <span className="text-slate-400">{playerStats.epicCrypt.total} ({Math.round((playerStats.epicCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
-                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
-                        <div style={{ width: `${(playerStats.legendary / playerStats.total) * 100}%` }} className="bg-amber-400 h-full rounded-full" />
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
+                        <div style={{ width: `${(playerStats.epicCrypt.total / playerStats.total) * 100}%` }} className="bg-purple-500 h-full rounded-full" />
                       </div>
+                      {Object.keys(playerStats.epicCrypt.levels).length > 0 && (
+                        <div className="text-[9px] text-slate-500 flex flex-wrap gap-1 mt-0.5">
+                          {Object.entries(playerStats.epicCrypt.levels)
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([lvl, count]) => (
+                              <span key={lvl} className="bg-slate-950 border border-slate-900/60 px-1.5 py-0.5 rounded font-mono">
+                                Lvl {lvl}: {count}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    {/* Epic */}
+                    {/* Rare Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-purple-400">Epic</span>
-                        <span className="text-slate-400">{playerStats.epic} ({Math.round((playerStats.epic / playerStats.total) * 100)}%)</span>
+                        <span className="font-bold text-blue-400">Rare Crypt</span>
+                        <span className="text-slate-400">{playerStats.rareCrypt.total} ({Math.round((playerStats.rareCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
-                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
-                        <div style={{ width: `${(playerStats.epic / playerStats.total) * 100}%` }} className="bg-purple-500 h-full rounded-full" />
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
+                        <div style={{ width: `${(playerStats.rareCrypt.total / playerStats.total) * 100}%` }} className="bg-blue-500 h-full rounded-full" />
                       </div>
+                      {Object.keys(playerStats.rareCrypt.levels).length > 0 && (
+                        <div className="text-[9px] text-slate-550 flex flex-wrap gap-1 mt-0.5">
+                          {Object.entries(playerStats.rareCrypt.levels)
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([lvl, count]) => (
+                              <span key={lvl} className="bg-slate-950 border border-slate-900/60 px-1.5 py-0.5 rounded font-mono">
+                                Lvl {lvl}: {count}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    {/* Rare */}
+                    {/* Common Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-blue-400">Rare/Crypt</span>
-                        <span className="text-slate-400">{playerStats.rare} ({Math.round((playerStats.rare / playerStats.total) * 100)}%)</span>
+                        <span className="font-bold text-green-400">Common Crypt</span>
+                        <span className="text-slate-400">{playerStats.commonCrypt.total} ({Math.round((playerStats.commonCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
-                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
-                        <div style={{ width: `${(playerStats.rare / playerStats.total) * 100}%` }} className="bg-blue-500 h-full rounded-full" />
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
+                        <div style={{ width: `${(playerStats.commonCrypt.total / playerStats.total) * 100}%` }} className="bg-green-500 h-full rounded-full" />
                       </div>
+                      {Object.keys(playerStats.commonCrypt.levels).length > 0 && (
+                        <div className="text-[9px] text-slate-550 flex flex-wrap gap-1 mt-0.5">
+                          {Object.entries(playerStats.commonCrypt.levels)
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([lvl, count]) => (
+                              <span key={lvl} className="bg-slate-950 border border-slate-900/60 px-1.5 py-0.5 rounded font-mono">
+                                Lvl {lvl}: {count}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    {/* Common */}
+                    {/* Citadel */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-green-400">Common</span>
-                        <span className="text-slate-400">{playerStats.common} ({Math.round((playerStats.common / playerStats.total) * 100)}%)</span>
+                        <span className="font-bold text-cyan-400">Citadel</span>
+                        <span className="text-slate-400">{playerStats.citadel.total} ({Math.round((playerStats.citadel.total / playerStats.total) * 100)}%)</span>
                       </div>
-                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
-                        <div style={{ width: `${(playerStats.common / playerStats.total) * 100}%` }} className="bg-green-500 h-full rounded-full" />
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
+                        <div style={{ width: `${(playerStats.citadel.total / playerStats.total) * 100}%` }} className="bg-cyan-500 h-full rounded-full" />
                       </div>
+                      {Object.keys(playerStats.citadel.levels).length > 0 && (
+                        <div className="text-[9px] text-slate-550 flex flex-wrap gap-1 mt-0.5">
+                          {Object.entries(playerStats.citadel.levels)
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([lvl, count]) => (
+                              <span key={lvl} className="bg-slate-950 border border-slate-900/60 px-1.5 py-0.5 rounded font-mono">
+                                Lvl {lvl}: {count}
+                              </span>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                    {/* Other */}
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1">
+                        <span className="font-bold text-slate-400">Other</span>
+                        <span className="text-slate-400">{playerStats.other.total} ({Math.round((playerStats.other.total / playerStats.total) * 100)}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
+                        <div style={{ width: `${(playerStats.other.total / playerStats.total) * 100}%` }} className="bg-slate-500 h-full rounded-full" />
+                      </div>
+                      {Object.keys(playerStats.other.levels).length > 0 && (
+                        <div className="text-[9px] text-slate-550 flex flex-wrap gap-1 mt-0.5">
+                          {Object.entries(playerStats.other.levels)
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([lvl, count]) => (
+                              <span key={lvl} className="bg-slate-950 border border-slate-900/60 px-1.5 py-0.5 rounded font-mono">
+                                Lvl {lvl}: {count}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

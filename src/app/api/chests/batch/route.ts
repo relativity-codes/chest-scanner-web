@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
 import { sendDiscordAlert } from "@/lib/discord";
+import { refreshCanonicalizationCache } from "@/lib/canonicalization";
 
 function getUTC10GameDay(date: Date): string {
   const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
@@ -41,33 +43,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 1. Bulk resolve player name fixes
+    // 1. Bulk resolve player name fixes utilizing in-memory cache to save DB calls
+    const { whitelist: whitelistNames, fixes: fixMap } = await refreshCanonicalizationCache();
+
+    // 2. Map raw names to corrected names, then deduplicate
     const rawNames = Array.from(
       new Set(validItems.map((item: any) => item.fromPlayer.trim()).filter(Boolean))
     ) as string[];
 
-    const fixes = await db.playerFix.findMany({
-      where: { ocrName: { in: rawNames } },
-    });
-
-    const fixMap = new Map<string, string>();
-    fixes.forEach((f) => {
-      fixMap.set(f.ocrName, f.correctedTo);
-    });
-
-    // 2. Map raw names to corrected names, then deduplicate
     const correctedNames = Array.from(
       new Set(rawNames.map((name) => fixMap.get(name) || name))
     );
 
-    // 3. Bulk check which corrected players exist in whitelist
-    const players = await db.player.findMany({
-      where: { name: { in: correctedNames } },
-    });
-
-    const whitelistNames = new Set(players.map((p) => p.name));
-
-    // 4. Any name not in player whitelist gets logged as UnknownPlayer
+    // 3. Any name not in player whitelist gets logged as UnknownPlayer (writes only when unrecognized)
     const unknownNames = correctedNames.filter((name) => !whitelistNames.has(name));
     if (unknownNames.length > 0) {
       await db.unknownPlayer.createMany({
@@ -76,7 +64,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 5. Prepare normalized chest objects
+    // 4. Prepare normalized chest objects
     const chestData = validItems.map((item: any) => {
       const canonicalPlayer = fixMap.get(item.fromPlayer.trim()) || item.fromPlayer.trim();
       const itemTime = new Date(item.time);
@@ -90,7 +78,7 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // 6. Deduplicate internally in this batch to prevent uniqueness violations in the same transaction
+    // 5. Deduplicate internally in this batch to prevent uniqueness violations in the same transaction
     const uniqueChestMap = new Map<string, typeof chestData[0]>();
     chestData.forEach((item) => {
       const key = `${item.chestName}|${item.fromPlayer}|${item.source}|${item.time.getTime()}|${item.gameDay}`;
@@ -100,48 +88,80 @@ export async function POST(req: NextRequest) {
     });
     const finalChestsToProcess = Array.from(uniqueChestMap.values());
 
-    // 7. Find which of these chests already exist in the database
-    const existingChests = await db.chest.findMany({
-      where: {
-        OR: finalChestsToProcess.map((item) => ({
-          chestName: item.chestName,
-          fromPlayer: item.fromPlayer,
-          source: item.source,
-          time: item.time,
-          gameDay: item.gameDay,
-        })),
-      },
-    });
-
-    const existingKeys = new Set(
-      existingChests.map(
-        (c) => `${c.chestName}|${c.fromPlayer}|${c.source}|${c.time.getTime()}|${c.gameDay}`
-      )
-    );
-
-    const newChests = finalChestsToProcess.filter((item) => {
-      const key = `${item.chestName}|${item.fromPlayer}|${item.source}|${item.time.getTime()}|${item.gameDay}`;
-      return !existingKeys.has(key);
-    });
-
     const createdChests = [];
 
-    // 8. Insert new chests in a transaction and emit to SSE
-    if (newChests.length > 0) {
-      try {
-        const created = await db.$transaction(
-          newChests.map((data) => db.chest.create({ data }))
-        );
-        createdChests.push(...created);
+    // Helper to chunk array (for fallback query)
+    const chunkArray = <T>(arr: T[], size: number): T[][] => {
+      const chunks = [];
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    };
 
-        // Emit events for all newly created chests
-        created.forEach((chest) => {
-          eventEmitter.emit(EVENTS.CHEST_SCANNED, chest);
+    // 6. Write-first bulk insertion & deduplication (createMany with skipDuplicates)
+    // We execute the bulk insert first. Under normal operations (no duplicate retries),
+    // this handles both insertion and database deduplication in exactly ONE database call!
+    if (finalChestsToProcess.length > 0) {
+      const chestsWithIds = finalChestsToProcess.map((item) => ({
+        id: randomUUID(),
+        ...item,
+        createdAt: new Date(),
+      }));
+
+      try {
+        const insertResult = await db.chest.createMany({
+          data: chestsWithIds,
+          skipDuplicates: true,
         });
-      } catch (transactionError: any) {
-        console.error("Failed transaction of batch chests insert, attempting fallback creates:", transactionError);
-        // Fallback: create individually if transaction fails due to concurrent insertions
-        for (const data of newChests) {
+
+        // Optimization: if all chests were inserted successfully, none of them were duplicates.
+        // We can emit all of them without query/roundtrip overhead!
+        if (insertResult.count === chestsWithIds.length) {
+          createdChests.push(...chestsWithIds);
+          chestsWithIds.forEach((chest) => {
+            eventEmitter.emit(EVENTS.CHEST_SCANNED, chest as any);
+          });
+        } else {
+          // If some chests were duplicates, run a fallback read query to identify the duplicates
+          // and only emit events for the truly new ones. This keeps SSE events 100% accurate.
+          const dbChunks = chunkArray(chestsWithIds, 100);
+          const existingChestsResults = await Promise.all(
+            dbChunks.map((chunk) =>
+              db.chest.findMany({
+                where: {
+                  OR: chunk.map((item) => ({
+                    chestName: item.chestName,
+                    fromPlayer: item.fromPlayer,
+                    source: item.source,
+                    time: item.time,
+                    gameDay: item.gameDay,
+                  })),
+                },
+              })
+            )
+          );
+          const existingChests = existingChestsResults.flat();
+          const existingKeys = new Set(
+            existingChests.map(
+              (c) => `${c.chestName}|${c.fromPlayer}|${c.source}|${c.time.getTime()}|${c.gameDay}`
+            )
+          );
+
+          const newChests = chestsWithIds.filter((item) => {
+            const key = `${item.chestName}|${item.fromPlayer}|${item.source}|${item.time.getTime()}|${item.gameDay}`;
+            return !existingKeys.has(key);
+          });
+
+          createdChests.push(...newChests);
+          newChests.forEach((chest) => {
+            eventEmitter.emit(EVENTS.CHEST_SCANNED, chest as any);
+          });
+        }
+      } catch (insertError: any) {
+        console.error("Failed bulk insert of batch chests, attempting fallback creates:", insertError);
+        // Fallback: create individually if bulk insert fails
+        for (const data of chestsWithIds) {
           try {
             const chest = await db.chest.create({ data });
             createdChests.push(chest);
