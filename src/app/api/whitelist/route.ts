@@ -7,20 +7,64 @@ import { sendDiscordAlert } from "@/lib/discord";
 export async function GET() {
   try {
     const playersList = await db.player.findMany({
-      select: { name: true },
+      select: { name: true, createdAt: true },
       orderBy: { name: "asc" },
     });
     const fixesList = await db.playerFix.findMany({
       orderBy: { ocrName: "asc" },
     });
 
-    const players = playersList.map((p: { name: any; }) => p.name);
+    // Group chests by player to find earliest scan time and total all-time scan count
+    const statsList = await db.chest.groupBy({
+      by: ["fromPlayer"],
+      _min: {
+        time: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const firstAppearances: Record<string, string> = {};
+    const totalAllTimeScans: Record<string, number> = {};
+
+    // 1. Initialize maps with chest statistics
+    for (const item of statsList) {
+      if (item.fromPlayer) {
+        if (item._min.time) {
+          firstAppearances[item.fromPlayer] = item._min.time.toISOString();
+        }
+        totalAllTimeScans[item.fromPlayer] = item._count.id;
+      }
+    }
+
+    // 2. Map whitelisted players list and combine/supplement with player.createdAt
+    const players = playersList.map((p: { name: string; createdAt: Date }) => {
+      const name = p.name;
+      const whitelistCreatedAt = p.createdAt.toISOString();
+      const existingAppearance = firstAppearances[name];
+
+      if (existingAppearance) {
+        if (new Date(whitelistCreatedAt) < new Date(existingAppearance)) {
+          firstAppearances[name] = whitelistCreatedAt;
+        }
+      } else {
+        firstAppearances[name] = whitelistCreatedAt;
+      }
+      return name;
+    });
+
     const fixes: Record<string, string> = {};
     for (const f of fixesList) {
       fixes[f.ocrName] = f.correctedTo;
     }
 
-    return NextResponse.json({ players, fixes });
+    return NextResponse.json({
+      players,
+      fixes,
+      firstAppearances,
+      totalAllTimeScans,
+    });
   } catch (error: any) {
     console.error("Failed to fetch whitelist:", error);
     await sendDiscordAlert(`GET /api/whitelist Error: ${error.message || String(error)}`);

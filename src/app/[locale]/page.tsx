@@ -144,6 +144,8 @@ interface PlayerContribution {
   sources: Record<string, number>;
   todayCount: number;
   weeklyCount: number;
+  ratePerDay: number;
+  ratePerWeek: number;
 }
 
 // Helper to calculate game day in UTC+10
@@ -154,6 +156,21 @@ function getUTC10GameDayStr(date: Date): string {
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
   return `chests_${yyyy}-${mm}-${dd}`;
+}
+
+function getUTC10DateOnly(date: Date | string): Date {
+  const d = new Date(date);
+  const utc10Time = d.getTime() + (10 * 60 * 60 * 1000);
+  const utc10Date = new Date(utc10Time);
+  return new Date(Date.UTC(utc10Date.getUTCFullYear(), utc10Date.getUTCMonth(), utc10Date.getUTCDate()));
+}
+
+function getDaysOnSystem(firstAppearance: Date | string, currentDate: Date): number {
+  const firstDateOnly = getUTC10DateOnly(firstAppearance);
+  const currentDateOnly = getUTC10DateOnly(currentDate);
+  const diffTime = currentDateOnly.getTime() - firstDateOnly.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  return Math.max(1, diffDays);
 }
 
 const ChestIcon = ({ type, className = "w-10 h-10" }: { type: string; className?: string }) => {
@@ -291,6 +308,9 @@ export default function Dashboard() {
   const clanName = process.env.NEXT_PUBLIC_CLAN_NAME ?? 'ELF';
   const [rawChests, setRawChests] = useState<Chest[]>([]);
   const [players, setPlayers] = useState<string[]>([]);
+  const [firstAppearances, setFirstAppearances] = useState<Record<string, string>>({});
+  const [totalAllTimeScans, setTotalAllTimeScans] = useState<Record<string, number>>({});
+  const [loadedChestIds, setLoadedChestIds] = useState<Set<string>>(new Set());
 
   // Premium Analytics & Filtering States
   const [filterSource, setFilterSource] = useState<string>("all");
@@ -358,6 +378,9 @@ export default function Dashboard() {
       const res = await fetch(url);
       const chestsData = await res.json();
       setRawChests(Array.isArray(chestsData) ? chestsData : []);
+      if (Array.isArray(chestsData)) {
+        setLoadedChestIds(new Set(chestsData.map((c) => c.id)));
+      }
     } catch (e) {
       console.error("Failed to load chests:", e);
     }
@@ -376,6 +399,8 @@ export default function Dashboard() {
       const unknownsData = await unknownsRes.json();
 
       setPlayers(Array.isArray(whitelistData.players) ? whitelistData.players : []);
+      setFirstAppearances(whitelistData.firstAppearances || {});
+      setTotalAllTimeScans(whitelistData.totalAllTimeScans || {});
       setFixes(Array.isArray(fixesData) ? fixesData : []);
       setUnknownPlayers(Array.isArray(unknownsData) ? unknownsData : []);
     } catch (e) {
@@ -494,15 +519,38 @@ export default function Dashboard() {
       }
     });
 
+    // We want to count how many new chests have been scanned by each player in real-time
+    const realTimeNewScans: Record<string, number> = {};
+    rawChests.forEach((chest) => {
+      if (!loadedChestIds.has(chest.id)) {
+        const p = chest.fromPlayer || "Unknown";
+        realTimeNewScans[p] = (realTimeNewScans[p] || 0) + 1;
+      }
+    });
+
     return Object.entries(contributions)
-      .map(([player, stats]) => ({ player, ...stats }))
+      .map(([player, stats]) => {
+        const firstAppearance = firstAppearances[player] || new Date().toISOString();
+        const allTimeScans = (totalAllTimeScans[player] || 0) + (realTimeNewScans[player] || 0);
+        const daysOnSystem = getDaysOnSystem(firstAppearance, now);
+
+        const ratePerDay = allTimeScans / daysOnSystem;
+        const ratePerWeek = ratePerDay * 7;
+
+        return {
+          player,
+          ...stats,
+          ratePerDay,
+          ratePerWeek
+        };
+      })
       .sort((a, b) => b.points - a.points || b.total - a.total);
-  }, [chests, rawChests, players, dailyTarget, weeklyTarget]);
+  }, [chests, rawChests, players, dailyTarget, weeklyTarget, firstAppearances, totalAllTimeScans, loadedChestIds]);
 
   const handleExportCSV = (contributionsList: PlayerContribution[]) => {
     const headers = [
       "Rank", "Player Name", "Epic Crypt", "Rare Crypt", "Common Crypt", "Citadel", "Other",
-      "Total Drops", "Clan Wealth", "Daily Target (20) Status", "Weekly Target (150) Status"
+      "Total Drops", "Clan Wealth", "Rate/Day", "Rate/Week", "Daily Target (20) Status", "Weekly Target (150) Status"
     ];
     const rows = contributionsList.map((item, idx) => {
       const dailyStatus = item.todayCount >= dailyTarget ? "Target Met" : `${item.todayCount}/${dailyTarget}`;
@@ -517,6 +565,8 @@ export default function Dashboard() {
         item.other.total,
         item.total,
         item.points,
+        item.ratePerDay.toFixed(2),
+        item.ratePerWeek.toFixed(2),
         `"${dailyStatus}"`,
         `"${weeklyStatus}"`
       ];
@@ -608,8 +658,13 @@ export default function Dashboard() {
         body: JSON.stringify({ name: trimmed }),
       });
       if (res.ok) {
+        const data = await res.json();
         setPlayers((prev) => [...prev, trimmed].sort());
         setNewPlayerName("");
+        setFirstAppearances((prev) => {
+          if (prev[trimmed]) return prev;
+          return { ...prev, [trimmed]: data.createdAt || new Date().toISOString() };
+        });
       }
     } catch (e) {
       console.error(e);
@@ -640,7 +695,12 @@ export default function Dashboard() {
       });
 
       if (addRes.ok) {
+        const data = await addRes.json();
         setPlayers((prev) => [...prev, ocrName].sort());
+        setFirstAppearances((prev) => {
+          if (prev[ocrName]) return prev;
+          return { ...prev, [ocrName]: data.createdAt || new Date().toISOString() };
+        });
 
         // 2. Delete from Unknown logs
         await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(ocrName)}`, {
@@ -1381,6 +1441,8 @@ export default function Dashboard() {
                       <th className="py-3 px-4 text-center text-slate-455">Other 🌀</th>
                       <th className="py-3 px-4 text-center font-bold text-amber-500 text-slate-455">Clan Wealth 💎</th>
                       <th className="py-3 px-4 text-center font-bold text-gold text-slate-455">Total Drops</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Rate/Day</th>
+                      <th className="py-3 px-4 text-center text-slate-455">Rate/Week</th>
                       <th className="py-3 px-4 text-center text-slate-455 w-32">Daily Target ({dailyTarget})</th>
                       <th className="py-3 px-4 text-center text-slate-455 w-32">Weekly Target ({weeklyTarget})</th>
                       <th className="py-3 px-4 w-40 text-slate-455">Status Level</th>
@@ -1543,6 +1605,12 @@ export default function Dashboard() {
                             <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm">
                               {item.total}
                             </td>
+                            <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
+                              {item.ratePerDay.toFixed(1)}
+                            </td>
+                            <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
+                              {item.ratePerWeek.toFixed(1)}
+                            </td>
                             <td className="py-3 px-4 text-center">
                               {item.todayCount >= dailyTarget ? (
                                 <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
@@ -1639,7 +1707,7 @@ export default function Dashboard() {
                         </div>
 
                         {/* Stats grid */}
-                        <div className="grid grid-cols-4 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
+                        <div className="grid grid-cols-3 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
                           <div>
                             <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Epic 🐉</span>
                             <span className="font-mono font-bold text-purple-400">{item.epicCrypt.total}</span>
@@ -1667,6 +1735,14 @@ export default function Dashboard() {
                           <div>
                             <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Wealth 💎</span>
                             <span className="font-mono font-bold text-amber-500 text-xs">{item.points.toLocaleString()}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rate/Day ⏱️</span>
+                            <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerDay.toFixed(1)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rate/Week 📈</span>
+                            <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerWeek.toFixed(1)}</span>
                           </div>
                         </div>
 
@@ -1951,7 +2027,9 @@ export default function Dashboard() {
           other: { total: 0, levels: {} },
           sources: {},
           todayCount: 0,
-          weeklyCount: 0
+          weeklyCount: 0,
+          ratePerDay: 0,
+          ratePerWeek: 0
         };
         const playerChests = chests.filter(c => c.fromPlayer === selectedPlayerDetail).slice(0, 10);
         
@@ -2025,6 +2103,34 @@ export default function Dashboard() {
                   <p className="text-xs sm:text-sm font-black text-gold mt-0.5 sm:mt-1">
                     {playerStats.weeklyCount} / {weeklyTarget}
                     <span className="text-[9px] sm:text-[10px] text-slate-450 block mt-0.5">({Math.min(100, Math.round((playerStats.weeklyCount / weeklyTarget) * 100))}%)</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* System Activity & Rates */}
+              <div className="grid grid-cols-2 gap-3 mb-5 sm:mb-6 text-xs bg-slate-950/30 p-3 rounded-lg border border-slate-900/50">
+                <div className="space-y-1 text-left">
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">First Appearance</span>
+                  <p className="text-slate-200 font-mono font-bold">
+                    {firstAppearances[selectedPlayerDetail] ? new Date(firstAppearances[selectedPlayerDetail]).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A"}
+                  </p>
+                </div>
+                <div className="space-y-1 text-left">
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Active Duration</span>
+                  <p className="text-slate-200 font-bold">
+                    {firstAppearances[selectedPlayerDetail] ? `${getDaysOnSystem(firstAppearances[selectedPlayerDetail], new Date())} days` : "N/A"}
+                  </p>
+                </div>
+                <div className="space-y-1 text-left">
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Average Rate/Day</span>
+                  <p className="text-amber-500 font-mono font-black text-sm">
+                    {playerStats.ratePerDay ? `${playerStats.ratePerDay.toFixed(2)} / day` : "0.00 / day"}
+                  </p>
+                </div>
+                <div className="space-y-1 text-left">
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Average Rate/Week</span>
+                  <p className="text-amber-500 font-mono font-black text-sm">
+                    {playerStats.ratePerWeek ? `${playerStats.ratePerWeek.toFixed(2)} / week` : "0.00 / week"}
                   </p>
                 </div>
               </div>
