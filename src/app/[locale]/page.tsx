@@ -18,12 +18,18 @@ import {
   BookOpen,
   Filter,
   Calendar,
+  BarChart3,
   Download,
   Target,
   X,
   MessageCircle,
   MessageSquare,
-  Gem
+  Gem,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Trophy,
+  ScanText
 } from "lucide-react";
 
 interface Chest {
@@ -148,6 +154,43 @@ interface PlayerContribution {
   ratePerWeek: number;
 }
 
+type ContributionSortField = "points" | "total" | "ratePerDay" | "ratePerWeek" | "todayCount" | "weeklyCount";
+type SortDirection = "asc" | "desc";
+
+function SortableTh({
+  field,
+  activeField,
+  direction,
+  onSort,
+  className,
+  children,
+}: {
+  field: ContributionSortField;
+  activeField: ContributionSortField;
+  direction: SortDirection;
+  onSort: (field: ContributionSortField) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const isActive = activeField === field;
+  return (
+    <th className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="inline-flex items-center justify-center gap-1 hover:text-gold transition-colors w-full"
+      >
+        {children}
+        {isActive ? (
+          direction === "desc" ? <ArrowDown className="w-3 h-3 shrink-0" /> : <ArrowUp className="w-3 h-3 shrink-0" />
+        ) : (
+          <ArrowUpDown className="w-3 h-3 shrink-0 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 // Helper to calculate game day in UTC+10
 function getUTC10GameDayStr(date: Date): string {
   const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
@@ -172,6 +215,53 @@ function getDaysOnSystem(firstAppearance: Date | string, currentDate: Date): num
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
   return Math.max(1, diffDays);
 }
+
+function formatUTC10ShortDate(date: Date): string {
+  const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
+  const d = new Date(utc10Time);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+interface WeekBucket {
+  index: number;
+  title: string;
+  dateRange: string;
+}
+
+function getLast5WeekBuckets(now: Date): WeekBucket[] {
+  const endDate = getUTC10DateOnly(now);
+  return Array.from({ length: 5 }, (_, i) => {
+    const weekEnd = new Date(endDate);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() - i * 7);
+    const weekStart = new Date(weekEnd);
+    weekStart.setUTCDate(weekStart.getUTCDate() - 6);
+    const title = i === 0 ? "This Week" : i === 1 ? "Last Week" : `${i} Weeks Ago`;
+    return {
+      index: i,
+      title,
+      dateRange: `${formatUTC10ShortDate(weekStart)} – ${formatUTC10ShortDate(weekEnd)}`,
+    };
+  });
+}
+
+function getWeekIndexForChest(chestTime: string | Date, now: Date): number | null {
+  const chestDate = getUTC10DateOnly(chestTime);
+  const nowDate = getUTC10DateOnly(now);
+  const diffDays = Math.floor((nowDate.getTime() - chestDate.getTime()) / 86400000);
+  if (diffDays < 0 || diffDays >= 35) return null;
+  return Math.floor(diffDays / 7);
+}
+
+interface WeeklyPlayerContribution {
+  player: string;
+  weeks: [number, number, number, number, number];
+  weekPoints: [number, number, number, number, number];
+  total: number;
+  totalPoints: number;
+}
+
+type WeeklySortField = "total" | "week0" | "week1" | "week2" | "week3" | "week4";
 
 const ChestIcon = ({ type, className = "w-10 h-10" }: { type: string; className?: string }) => {
   if (type === "legendary") {
@@ -315,8 +405,10 @@ export default function Dashboard() {
   // Premium Analytics & Filtering States
   const [filterSource, setFilterSource] = useState<string>("all");
   const [filterDateRange, setFilterDateRange] = useState<string>("all");
-  const [dailyTarget, setDailyTarget] = useState<number>(20);
-  const [weeklyTarget, setWeeklyTarget] = useState<number>(150);
+  const [dailyTarget, setDailyTarget] = useState<number>(40);
+  const [weeklyTarget, setWeeklyTarget] = useState<number>(280);
+  const [contributionSortField, setContributionSortField] = useState<ContributionSortField>("points");
+  const [contributionSortDirection, setContributionSortDirection] = useState<SortDirection>("desc");
 
   const isDaily = filterDateRange === "today";
   const activeTarget = isDaily ? dailyTarget : weeklyTarget;
@@ -353,7 +445,9 @@ export default function Dashboard() {
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
-  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "whitelist" | "corrections">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections">("live");
+  const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
+  const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
   const [isConnected, setIsConnected] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -414,7 +508,7 @@ export default function Dashboard() {
     fetchInitialMetadata();
   }, []);
 
-  // Fetch chests whenever filterDateRange changes
+  // Fetch chests whenever filterDateRange changes (API returns last 5 weeks max)
   useEffect(() => {
     fetchChests(filterDateRange);
   }, [filterDateRange, fetchChests]);
@@ -543,14 +637,136 @@ export default function Dashboard() {
           ratePerDay,
           ratePerWeek
         };
-      })
-      .sort((a, b) => b.points - a.points || b.total - a.total);
-  }, [chests, rawChests, players, dailyTarget, weeklyTarget, firstAppearances, totalAllTimeScans, loadedChestIds]);
+      });
+  }, [chests, rawChests, players, firstAppearances, totalAllTimeScans, loadedChestIds]);
+
+  const handleContributionSort = useCallback((field: ContributionSortField) => {
+    if (contributionSortField === field) {
+      setContributionSortDirection((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setContributionSortField(field);
+      setContributionSortDirection("desc");
+    }
+  }, [contributionSortField]);
+
+  const sortedContributionsList = useMemo(() => {
+    const query = playerSearchQuery.toLowerCase();
+    const getSortValue = (item: PlayerContribution): number => {
+      switch (contributionSortField) {
+        case "points": return item.points;
+        case "total": return item.total;
+        case "ratePerDay": return item.ratePerDay;
+        case "ratePerWeek": return item.ratePerWeek;
+        case "todayCount": return item.todayCount;
+        case "weeklyCount": return item.weeklyCount;
+      }
+    };
+
+    return [...contributionsList]
+      .filter((item) => item.player.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const diff = contributionSortDirection === "desc"
+          ? getSortValue(b) - getSortValue(a)
+          : getSortValue(a) - getSortValue(b);
+        if (diff !== 0) return diff;
+        return b.points - a.points || b.total - a.total || a.player.localeCompare(b.player);
+      });
+  }, [contributionsList, playerSearchQuery, contributionSortField, contributionSortDirection]);
+
+  const weekBuckets = useMemo(() => getLast5WeekBuckets(new Date()), []);
+
+  const weeklyContributionsList = useMemo(() => {
+    const now = new Date();
+    const initWeeklyStats = () => ({
+      weeks: [0, 0, 0, 0, 0] as [number, number, number, number, number],
+      weekPoints: [0, 0, 0, 0, 0] as [number, number, number, number, number],
+    });
+    const data: Record<string, ReturnType<typeof initWeeklyStats>> = {};
+
+    players.forEach((p) => {
+      data[p] = initWeeklyStats();
+    });
+
+    rawChests
+      .filter((chest) => filterSource === "all" || chest.source === filterSource)
+      .forEach((chest) => {
+        const weekIdx = getWeekIndexForChest(chest.time, now);
+        if (weekIdx === null) return;
+        const p = chest.fromPlayer || "Unknown";
+        if (!data[p]) data[p] = initWeeklyStats();
+        data[p].weeks[weekIdx] += 1;
+        data[p].weekPoints[weekIdx] += calculateChestPoints(chest.chestName, chest.source);
+      });
+
+    return Object.entries(data).map(([player, stats]) => ({
+      player,
+      weeks: stats.weeks,
+      weekPoints: stats.weekPoints,
+      total: stats.weeks.reduce((sum, n) => sum + n, 0),
+      totalPoints: stats.weekPoints.reduce((sum, n) => sum + n, 0),
+    }));
+  }, [rawChests, players, filterSource]);
+
+  const handleWeeklySort = useCallback((field: WeeklySortField) => {
+    if (weeklySortField === field) {
+      setWeeklySortDirection((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setWeeklySortField(field);
+      setWeeklySortDirection("desc");
+    }
+  }, [weeklySortField]);
+
+  const getWeeklySortValue = (item: WeeklyPlayerContribution, field: WeeklySortField): number => {
+    if (field === "total") return item.total;
+    const weekIndex = Number(field.replace("week", ""));
+    return item.weeks[weekIndex];
+  };
+
+  const sortedWeeklyContributionsList = useMemo(() => {
+    const query = playerSearchQuery.toLowerCase();
+    return [...weeklyContributionsList]
+      .filter((item) => item.player.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const diff = weeklySortDirection === "desc"
+          ? getWeeklySortValue(b, weeklySortField) - getWeeklySortValue(a, weeklySortField)
+          : getWeeklySortValue(a, weeklySortField) - getWeeklySortValue(b, weeklySortField);
+        if (diff !== 0) return diff;
+        return b.total - a.total || a.player.localeCompare(b.player);
+      });
+  }, [weeklyContributionsList, playerSearchQuery, weeklySortField, weeklySortDirection]);
+
+  const handleExportWeeklyCSV = (list: WeeklyPlayerContribution[]) => {
+    const headers = [
+      "Rank",
+      "Player Name",
+      ...weekBuckets.map((w) => `${w.title} (${w.dateRange}) Drops`),
+      ...weekBuckets.map((w) => `${w.title} (${w.dateRange}) Wealth`),
+      "5-Week Total Drops",
+      "5-Week Total Wealth",
+    ];
+    const rows = list.map((item, idx) => [
+      idx + 1,
+      `"${item.player.replace(/"/g, '""')}"`,
+      ...item.weeks,
+      ...item.weekPoints,
+      item.total,
+      item.totalPoints,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${clanName.toLowerCase()}_weekly_contributions_last_5_weeks.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const handleExportCSV = (contributionsList: PlayerContribution[]) => {
     const headers = [
       "Rank", "Player Name", "Epic Crypt", "Rare Crypt", "Common Crypt", "Citadel", "Other",
-      "Total Drops", "Clan Wealth", "Rate/Day", "Rate/Week", "Daily Target (20) Status", "Weekly Target (150) Status"
+      "Total Drops", "Clan Wealth", "Rate/Day", "Rate/Week", `Daily Target (${dailyTarget}) Status`, `Weekly Target (${weeklyTarget}) Status`
     ];
     const rows = contributionsList.map((item, idx) => {
       const dailyStatus = item.todayCount >= dailyTarget ? "Target Met" : `${item.todayCount}/${dailyTarget}`;
@@ -1078,21 +1294,33 @@ export default function Dashboard() {
       <div className="flex border-b border-slate-800/80 mb-5 gap-1 overflow-x-auto scrollbar-none snap-x -mx-4 px-4 md:mx-0 md:px-0 whitespace-nowrap">
         <button
           onClick={() => setActiveTab("live")}
-          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "live"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "live"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
         >
+          <Activity className="w-3.5 h-3.5" />
           Live Scanner Feed
         </button>
         <button
           onClick={() => setActiveTab("contributions")}
-          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "contributions"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "contributions"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
         >
+          <Trophy className="w-3.5 h-3.5" />
           Player Contributions
+        </button>
+        <button
+          onClick={() => setActiveTab("weekly")}
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "weekly"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          Weekly History
         </button>
         <button
           onClick={() => setActiveTab("whitelist")}
@@ -1101,6 +1329,7 @@ export default function Dashboard() {
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
         >
+          <Users className="w-3.5 h-3.5" />
           Clan Whitelist
           {unknownPlayers.length > 0 && (
             <span className="bg-rose-500 text-white text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse flex-shrink-0">
@@ -1110,11 +1339,12 @@ export default function Dashboard() {
         </button>
         <button
           onClick={() => setActiveTab("corrections")}
-          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start ${activeTab === "corrections"
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "corrections"
             ? "border-amber-500 text-gold font-bold"
             : "border-transparent text-slate-400 hover:text-slate-200"
             }`}
         >
+          <ScanText className="w-3.5 h-3.5" />
           OCR Name Corrections
         </button>
       </div>
@@ -1284,9 +1514,9 @@ export default function Dashboard() {
 
       {/* 4. TAB: PLAYER CONTRIBUTIONS LEADERBOARD */}
       {activeTab === "contributions" && (() => {
-        // contributionsList is already memoized above
-        const topContributor = contributionsList[0]?.player || "None";
-        const topContributorPoints = contributionsList[0]?.points || 0;
+        const topByPoints = [...contributionsList].sort((a, b) => b.points - a.points || b.total - a.total)[0];
+        const topContributor = topByPoints?.player || "None";
+        const topContributorPoints = topByPoints?.points || 0;
         const totalScanChests = chests.length;
         const averageChestsPerPlayer = players.length > 0 ? (totalScanChests / players.length).toFixed(1) : "0.0";
 
@@ -1372,7 +1602,7 @@ export default function Dashboard() {
                       onChange={(e) => setFilterDateRange(e.target.value)}
                       className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
                     >
-                      <option value="all">All Time</option>
+                      <option value="all">Last 5 Weeks</option>
                       <option value="today">Today (UTC+10)</option>
                       <option value="week">Past 7 Days</option>
                       <option value="month">Past 30 Days</option>
@@ -1406,8 +1636,34 @@ export default function Dashboard() {
 
                 {/* Right side search + download */}
                 <div className="flex gap-2 items-center w-full md:w-auto mt-2.5 md:mt-0">
+                  <div className="flex items-center gap-1.5 md:hidden w-full">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <select
+                      value={`${contributionSortField}-${contributionSortDirection}`}
+                      onChange={(e) => {
+                        const [field, direction] = e.target.value.split("-") as [ContributionSortField, SortDirection];
+                        setContributionSortField(field);
+                        setContributionSortDirection(direction);
+                      }}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-350 focus:outline-none focus:border-amber-500/50 text-xs w-full"
+                    >
+                      <option value="points-desc">Clan Wealth (High → Low)</option>
+                      <option value="points-asc">Clan Wealth (Low → High)</option>
+                      <option value="total-desc">Total Drops (High → Low)</option>
+                      <option value="total-asc">Total Drops (Low → High)</option>
+                      <option value="ratePerDay-desc">Rate/Day (High → Low)</option>
+                      <option value="ratePerDay-asc">Rate/Day (Low → High)</option>
+                      <option value="ratePerWeek-desc">Rate/Week (High → Low)</option>
+                      <option value="ratePerWeek-asc">Rate/Week (Low → High)</option>
+                      <option value="todayCount-desc">Daily Target (High → Low)</option>
+                      <option value="todayCount-asc">Daily Target (Low → High)</option>
+                      <option value="weeklyCount-desc">Weekly Target (High → Low)</option>
+                      <option value="weeklyCount-asc">Weekly Target (Low → High)</option>
+                    </select>
+                  </div>
+
                   <button
-                    onClick={() => handleExportCSV(contributionsList)}
+                    onClick={() => handleExportCSV(sortedContributionsList)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
                   >
                     <Download className="w-4 h-4" />
@@ -1439,19 +1695,29 @@ export default function Dashboard() {
                       <th className="py-3 px-4 text-center text-slate-455">Common Crypt 📦</th>
                       <th className="py-3 px-4 text-center text-slate-455">Citadel 🏰</th>
                       <th className="py-3 px-4 text-center text-slate-455">Other 🌀</th>
-                      <th className="py-3 px-4 text-center font-bold text-amber-500 text-slate-455">Clan Wealth 💎</th>
-                      <th className="py-3 px-4 text-center font-bold text-gold text-slate-455">Total Drops</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Rate/Day</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Rate/Week</th>
-                      <th className="py-3 px-4 text-center text-slate-455 w-32">Daily Target ({dailyTarget})</th>
-                      <th className="py-3 px-4 text-center text-slate-455 w-32">Weekly Target ({weeklyTarget})</th>
+                      <SortableTh field="points" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center font-bold text-amber-500 text-slate-455">
+                        Clan Wealth 💎
+                      </SortableTh>
+                      <SortableTh field="total" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center font-bold text-gold text-slate-455">
+                        Total Drops
+                      </SortableTh>
+                      <SortableTh field="ratePerDay" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455">
+                        Rate/Day
+                      </SortableTh>
+                      <SortableTh field="ratePerWeek" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455">
+                        Rate/Week
+                      </SortableTh>
+                      <SortableTh field="todayCount" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455 w-32">
+                        Daily Target ({dailyTarget})
+                      </SortableTh>
+                      <SortableTh field="weeklyCount" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455 w-32">
+                        Weekly Target ({weeklyTarget})
+                      </SortableTh>
                       <th className="py-3 px-4 w-40 text-slate-455">Status Level</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {contributionsList
-                      .filter(item => item.player.toLowerCase().includes(playerSearchQuery.toLowerCase()))
-                      .map((item, idx) => {
+                    {sortedContributionsList.map((item, idx) => {
                         let statusText = "Recruit";
                         let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
                         if (item.total >= 30) {
@@ -1663,9 +1929,7 @@ export default function Dashboard() {
 
               {/* Mobile Card List View */}
               <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
-                {contributionsList
-                  .filter(item => item.player.toLowerCase().includes(playerSearchQuery.toLowerCase()))
-                  .map((item, idx) => {
+                {sortedContributionsList.map((item, idx) => {
                     let rankBadge = "";
                     if (idx === 0) rankBadge = "🥇";
                     else if (idx === 1) rankBadge = "🥈";
@@ -1785,6 +2049,242 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* TAB: WEEKLY CONTRIBUTIONS (LAST 5 WEEKS) */}
+      {activeTab === "weekly" && (() => {
+        const topThisWeek = [...weeklyContributionsList].sort((a, b) => b.weeks[0] - a.weeks[0])[0];
+        const clanWeeklyTotal = weeklyContributionsList.reduce((sum, p) => sum + p.total, 0);
+        const metTargetThisWeek = weeklyContributionsList.filter((p) => p.weeks[0] >= weeklyTarget).length;
+
+        const weeklySortableTh = (field: WeeklySortField, className: string, children: React.ReactNode) => {
+          const isActive = weeklySortField === field;
+          return (
+            <th className={className}>
+              <button
+                type="button"
+                onClick={() => handleWeeklySort(field)}
+                className="inline-flex items-center justify-center gap-1 hover:text-gold transition-colors w-full"
+              >
+                {children}
+                {isActive ? (
+                  weeklySortDirection === "desc" ? <ArrowDown className="w-3 h-3 shrink-0" /> : <ArrowUp className="w-3 h-3 shrink-0" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 shrink-0 opacity-40" />
+                )}
+              </button>
+            </th>
+          );
+        };
+
+        return (
+          <div className="flex flex-col gap-5 lg:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏆 TOP THIS WEEK</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-lg md:text-2xl font-black text-gold truncate max-w-[140px] sm:max-w-[200px]">
+                    {topThisWeek?.player || "None"}
+                  </span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topThisWeek?.weeks[0] || 0} drops</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
+                  <span>{weekBuckets[0]?.dateRange}</span>
+                </div>
+              </div>
+
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">📊 5-WEEK CLAN TOTAL</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{clanWeeklyTotal.toLocaleString()}</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">drops</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
+                  <span>Across all tracked members</span>
+                </div>
+              </div>
+
+              <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🎯 MET WEEKLY TARGET</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{metTargetThisWeek}</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} ({weeklyTarget}/wk)</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
+                  <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
+                  <span>Members hitting target this week</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
+              <div className="flex flex-col gap-1.5 mb-3.5">
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">📈 {clanName} WEEKLY CONTRIBUTION HISTORY</h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">Drop counts per player for the last 5 rolling weeks (UTC+10).</p>
+              </div>
+
+              <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
+                <div className="flex flex-wrap gap-2.5 sm:gap-3 items-center text-[11px] sm:text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-slate-400 font-semibold">Source:</span>
+                    <select
+                      value={filterSource}
+                      onChange={(e) => setFilterSource(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
+                    >
+                      <option value="all">All Sources</option>
+                      <option value="Crypt">Crypts</option>
+                      <option value="Monster">Monsters</option>
+                      <option value="PvP">PvP</option>
+                      <option value="Arena">Arena</option>
+                      <option value="Tower">Tower</option>
+                      <option value="Clan">Clan</option>
+                      <option value="Chest">Chest</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-center w-full md:w-auto">
+                  <button
+                    onClick={() => handleExportWeeklyCSV(sortedWeeklyContributionsList)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export CSV
+                  </button>
+
+                  <div className="relative w-full md:w-auto">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search player..."
+                      value={playerSearchQuery}
+                      onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                      className="pl-9 pr-4 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-full md:w-56"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden md:block overflow-x-auto flex-1">
+                <table className="w-full text-left text-xs border-collapse min-w-[900px]">
+                  <thead>
+                    <tr className="border-b border-slate-850 text-slate-450 font-bold uppercase tracking-wider font-cinzel">
+                      <th className="py-3 px-4 w-16 text-slate-450">Rank</th>
+                      <th className="py-3 px-4 text-slate-455">Player Name</th>
+                      {weekBuckets.map((week) =>
+                        weeklySortableTh(
+                          `week${week.index}` as WeeklySortField,
+                          "py-3 px-3 text-center text-slate-455 min-w-[100px]",
+                          <span className="flex flex-col items-center leading-tight">
+                            <span>{week.title}</span>
+                            <span className="text-[9px] font-normal text-slate-550 normal-case tracking-normal">{week.dateRange}</span>
+                          </span>
+                        )
+                      )}
+                      {weeklySortableTh("total", "py-3 px-4 text-center font-bold text-gold text-slate-455", "5-Wk Total")}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedWeeklyContributionsList.map((item, idx) => (
+                      <tr key={item.player} className="border-b border-slate-800/40 hover:bg-slate-900/20 transition-all">
+                        <td className="py-3 px-4">
+                          {idx === 0 ? (
+                            <span className="text-lg">🥇</span>
+                          ) : idx === 1 ? (
+                            <span className="text-lg">🥈</span>
+                          ) : idx === 2 ? (
+                            <span className="text-lg">🥉</span>
+                          ) : (
+                            <span className="w-5 h-5 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center font-bold text-slate-400 font-mono text-[9px]">
+                              #{idx + 1}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-200">
+                          <button
+                            onClick={() => setSelectedPlayerDetail(item.player)}
+                            className="hover:text-gold hover:underline transition-all text-left font-bold"
+                          >
+                            {item.player}
+                          </button>
+                        </td>
+                        {item.weeks.map((count, weekIdx) => (
+                          <td key={weekIdx} className="py-3 px-3 text-center">
+                            {count > 0 ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className={`font-mono font-bold text-sm ${weekIdx === 0 ? "text-gold" : "text-slate-300"}`}>
+                                  {count}
+                                </span>
+                                {weekIdx === 0 && count >= weeklyTarget && (
+                                  <span className="text-[8px] font-bold text-emerald-400">✓ Met</span>
+                                )}
+                                {weekIdx === 0 && count > 0 && count < weeklyTarget && (
+                                  <span className="text-[8px] text-slate-550">{count}/{weeklyTarget}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-700 font-mono">-</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm bg-amber-500/5">
+                          {item.total}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
+                {sortedWeeklyContributionsList.map((item, idx) => {
+                  let rankBadge = "";
+                  if (idx === 0) rankBadge = "🥇";
+                  else if (idx === 1) rankBadge = "🥈";
+                  else if (idx === 2) rankBadge = "🥉";
+
+                  return (
+                    <div key={item.player} className="p-3 sm:p-4 bg-slate-950/45 border border-slate-900 rounded-xl sm:rounded-2xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-slate-400 font-bold w-5 text-xs sm:text-sm">
+                            {rankBadge || `#${idx + 1}`}
+                          </span>
+                          <button
+                            onClick={() => setSelectedPlayerDetail(item.player)}
+                            className="font-bold text-slate-200 hover:text-gold hover:underline text-xs sm:text-sm text-left"
+                          >
+                            {item.player}
+                          </button>
+                        </div>
+                        <span className="font-mono font-bold text-gold text-xs">{item.total} total</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[9px] sm:text-[10px]">
+                        {weekBuckets.map((week, weekIdx) => (
+                          <div key={week.index} className="bg-slate-900/30 p-2 rounded-lg border border-slate-900/50">
+                            <span className="text-slate-500 block mb-0.5 uppercase tracking-tighter text-[8.5px]">{week.title}</span>
+                            <span className="text-[8px] text-slate-600 block mb-1">{week.dateRange}</span>
+                            <span className={`font-mono font-bold text-sm ${weekIdx === 0 ? "text-gold" : "text-slate-300"}`}>
+                              {item.weeks[weekIdx] || 0}
+                            </span>
+                            {weekIdx === 0 && item.weeks[0] >= weeklyTarget && (
+                              <span className="text-[8px] font-bold text-emerald-400 block mt-0.5">Target met ✓</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

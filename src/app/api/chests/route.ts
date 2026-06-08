@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { eventEmitter, EVENTS } from "@/lib/emitter";
 import { canonicalizePlayerName } from "@/lib/canonicalization";
 import { sendDiscordAlert } from "@/lib/discord";
+import { getChestHistoryTimeFilter } from "@/lib/chest-history";
 
 function getUTC10GameDay(date: Date): string {
   const utc10Time = date.getTime() + (10 * 60 * 60 * 1000);
@@ -21,7 +22,9 @@ export async function GET(req: NextRequest) {
     const limitParam = searchParams.get("limit");
     const gameDay = searchParams.get("gameDay");
 
-    const where: any = {};
+    const where: any = {
+      ...getChestHistoryTimeFilter(),
+    };
     if (gameDay) {
       where.gameDay = gameDay;
     }

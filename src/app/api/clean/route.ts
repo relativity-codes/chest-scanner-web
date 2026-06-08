@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getChestHistoryTimeFilter } from '@/lib/chest-history';
 
 export async function GET() {
-  const chests = await db.chest.findMany();
+  const chests = await db.chest.findMany({
+    where: getChestHistoryTimeFilter(),
+  });
   
   const uniqueChests = new Map();
   const duplicates = [];

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sendDiscordAlert } from "@/lib/discord";
+import { getChestHistoryTimeFilter } from "@/lib/chest-history";
 
 // GET: Return whitelisted players & corrections map
 export async function GET() {
@@ -14,9 +15,10 @@ export async function GET() {
       orderBy: { ocrName: "asc" },
     });
 
-    // Group chests by player to find earliest scan time and total all-time scan count
+    // Group chests by player to find earliest scan time and total scan count (last 5 weeks)
     const statsList = await db.chest.groupBy({
       by: ["fromPlayer"],
+      where: getChestHistoryTimeFilter(),
       _min: {
         time: true,
       },
