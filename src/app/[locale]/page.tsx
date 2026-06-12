@@ -417,6 +417,11 @@ export default function Dashboard() {
 
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<string | null>(null);
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [deleteSecretKeyInput, setDeleteSecretKeyInput] = useState("");
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
 
   // Compute active filtered chests
   const chests = useMemo(() => {
@@ -990,6 +995,35 @@ export default function Dashboard() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleConfirmDeleteContributions = async (player: string) => {
+    setIsDeleting(true);
+    setDeleteErrorMessage("");
+    try {
+      const res = await fetch(`/api/chests?player=${encodeURIComponent(player)}&secretKey=${encodeURIComponent(deleteSecretKeyInput)}`, {
+        method: "DELETE",
+      });
+      
+      if (res.ok) {
+        // Refresh chests & metadata
+        await fetchChests(filterDateRange);
+        await fetchInitialMetadata();
+        
+        // Reset state & close modals
+        setShowDeleteConfirm(null);
+        setSelectedPlayerDetail(null);
+        setDeleteSecretKeyInput("");
+      } else {
+        const data = await res.json();
+        setDeleteErrorMessage(data.error || "Failed to delete contributions.");
+      }
+    } catch (err) {
+      console.error(err);
+      setDeleteErrorMessage("Network error: failed to delete contributions.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -2786,10 +2820,107 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Delete Contributions Area */}
+              <div className="border-t border-slate-900/60 pt-4 mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowDeleteConfirm(selectedPlayerDetail)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/35 hover:border-red-500/50 text-red-400 font-bold rounded-xl text-xs transition-all cursor-pointer animate-pulse-slow"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete Contributions
+                </button>
+              </div>
             </div>
           </div>
         );
       })()}
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60] animate-fade-in">
+          <div className="glass-panel max-w-md w-full rounded-xl sm:rounded-2xl p-4 sm:p-6 border-red-500/20 shadow-lg shadow-red-500/5 relative">
+            <button 
+              onClick={() => {
+                setShowDeleteConfirm(null);
+                setDeleteSecretKeyInput("");
+                setDeleteErrorMessage("");
+              }}
+              className="absolute top-3 right-3 sm:top-4 sm:right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+              disabled={isDeleting}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4 text-red-500">
+              <div className="bg-red-500/10 p-2.5 rounded-xl border border-red-500/20">
+                <Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
+              </div>
+              <div>
+                <h2 className="text-md sm:text-lg font-bold text-slate-100">Delete Contributions</h2>
+                <p className="text-xs text-red-400 font-medium">Critical Action Required</p>
+              </div>
+            </div>
+
+            <div className="bg-red-950/20 border border-red-900/30 p-3 rounded-lg text-xs text-red-200/90 leading-relaxed mb-4">
+              <strong>Warning:</strong> This will permanently delete <strong>all</strong> chest scans and points contributed by <strong className="text-red-400">{showDeleteConfirm}</strong>. This action cannot be undone.
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Secret Admin Key
+                </label>
+                <input
+                  type="password"
+                  placeholder="Enter delete secret key"
+                  value={deleteSecretKeyInput}
+                  onChange={(e) => {
+                    setDeleteSecretKeyInput(e.target.value);
+                    if (deleteErrorMessage) setDeleteErrorMessage("");
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-650 focus:outline-none focus:border-red-500/50"
+                  disabled={isDeleting}
+                />
+              </div>
+
+              {deleteErrorMessage && (
+                <p className="text-[11px] text-red-400 font-semibold flex items-center gap-1.5 bg-red-950/20 border border-red-900/40 p-2 rounded-lg">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>{deleteErrorMessage}</span>
+                </p>
+              )}
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirm(null);
+                    setDeleteSecretKeyInput("");
+                    setDeleteErrorMessage("");
+                  }}
+                  className="flex-1 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleConfirmDeleteContributions(showDeleteConfirm)}
+                  className="flex-1 py-2 bg-red-600/90 hover:bg-red-600 border border-red-500/30 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  disabled={isDeleting || !deleteSecretKeyInput.trim()}
+                >
+                  {isDeleting ? (
+                    <span>Deleting...</span>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete All</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

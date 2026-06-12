@@ -92,3 +92,59 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// DELETE: Delete entire player contribution (all chest scans) for a specific player
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const player = searchParams.get("player");
+    const secretKey = searchParams.get("secretKey");
+
+    if (!player) {
+      return NextResponse.json(
+        { error: "Player parameter is required" },
+        { status: 400 }
+      );
+    }
+
+    const expectedKey = process.env.DELETE_SECRET_KEY;
+    if (!expectedKey) {
+      return NextResponse.json(
+        { error: "Delete secret key is not configured on the server" },
+        { status: 500 }
+      );
+    }
+
+    if (secretKey !== expectedKey) {
+      return NextResponse.json(
+        { error: "Invalid secret key" },
+        { status: 401 }
+      );
+    }
+
+    const canonicalPlayer = await canonicalizePlayerName(player);
+
+    const deleteResult = await db.chest.deleteMany({
+      where: {
+        fromPlayer: canonicalPlayer,
+      },
+    });
+
+    await sendDiscordAlert(
+      `🗑️ **Contributions Deleted**: All ${deleteResult.count} chest scans for player **${canonicalPlayer}** have been deleted by an admin.`
+    );
+
+    return NextResponse.json({
+      success: true,
+      count: deleteResult.count,
+    });
+  } catch (error: any) {
+    console.error("Failed to delete player contributions:", error);
+    await sendDiscordAlert(`DELETE /api/chests Error: ${error.message || String(error)}`);
+    return NextResponse.json(
+      { error: "Failed to delete player contributions" },
+      { status: 500 }
+    );
+  }
+}
+
