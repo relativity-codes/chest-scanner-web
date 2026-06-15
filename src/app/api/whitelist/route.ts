@@ -30,13 +30,26 @@ export async function GET() {
     const firstAppearances: Record<string, string> = {};
     const totalAllTimeScans: Record<string, number> = {};
 
+    // Build fixes map for canonicalization
+    const fixesMap = new Map<string, string>();
+    for (const f of fixesList) {
+      fixesMap.set(f.ocrName, f.correctedTo);
+    }
+
     // 1. Initialize maps with chest statistics
     for (const item of statsList) {
       if (item.fromPlayer) {
+        const rawPlayer = item.fromPlayer;
+        const player = fixesMap.get(rawPlayer) || rawPlayer;
+
         if (item._min.time) {
-          firstAppearances[item.fromPlayer] = item._min.time.toISOString();
+          const currentTime = item._min.time.toISOString();
+          const existingTime = firstAppearances[player];
+          if (!existingTime || new Date(currentTime) < new Date(existingTime)) {
+            firstAppearances[player] = currentTime;
+          }
         }
-        totalAllTimeScans[item.fromPlayer] = item._count.id;
+        totalAllTimeScans[player] = (totalAllTimeScans[player] || 0) + item._count.id;
       }
     }
 

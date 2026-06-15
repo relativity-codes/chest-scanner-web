@@ -422,10 +422,44 @@ export default function Dashboard() {
   const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [fixes, setFixes] = useState<PlayerFix[]>([]);
+  const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
+
+  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections">("live");
+  const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
+  const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
+  const [isConnected, setIsConnected] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Roster inputs
+  const [newPlayerName, setNewPlayerName] = useState("");
+  const [playerSearchQuery, setPlayerSearchQuery] = useState("");
+
+  // Correction inputs
+  const [ocrErrorInput, setOcrErrorInput] = useState("");
+  const [ocrCorrectToInput, setOcrCorrectToInput] = useState("");
+
+  // Dynamically map rawChests based on spelling fixes
+  const mappedRawChests = useMemo(() => {
+    const fixesMap = new Map<string, string>();
+    fixes.forEach((f) => {
+      fixesMap.set(f.ocrName, f.correctedTo);
+    });
+
+    return rawChests.map((chest) => {
+      const rawP = chest.fromPlayer || "Unknown";
+      const correctedP = fixesMap.get(rawP) || rawP;
+      if (correctedP === rawP) return chest;
+      return {
+        ...chest,
+        fromPlayer: correctedP,
+      };
+    });
+  }, [rawChests, fixes]);
 
   // Compute active filtered chests
   const chests = useMemo(() => {
-    return rawChests.filter(chest => {
+    return mappedRawChests.filter(chest => {
       if (filterSource !== "all" && chest.source !== filterSource) {
         return false;
       }
@@ -446,23 +480,7 @@ export default function Dashboard() {
       }
       return true;
     });
-  }, [rawChests, filterSource, filterDateRange]);
-  const [fixes, setFixes] = useState<PlayerFix[]>([]);
-  const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
-
-  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections">("live");
-  const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
-  const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
-  const [isConnected, setIsConnected] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-
-  // Roster inputs
-  const [newPlayerName, setNewPlayerName] = useState("");
-  const [playerSearchQuery, setPlayerSearchQuery] = useState("");
-
-  // Correction inputs
-  const [ocrErrorInput, setOcrErrorInput] = useState("");
-  const [ocrCorrectToInput, setOcrCorrectToInput] = useState("");
+  }, [mappedRawChests, filterSource, filterDateRange]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -604,8 +622,8 @@ export default function Dashboard() {
       }
     });
 
-    // Populate todayCount and weeklyCount based on rawChests (overall scanning stats)
-    rawChests.forEach((chest) => {
+    // Populate todayCount and weeklyCount based on mappedRawChests (overall scanning stats)
+    mappedRawChests.forEach((chest) => {
       const p = chest.fromPlayer || "Unknown";
       if (!contributions[p]) return;
 
@@ -620,7 +638,7 @@ export default function Dashboard() {
 
     // We want to count how many new chests have been scanned by each player in real-time
     const realTimeNewScans: Record<string, number> = {};
-    rawChests.forEach((chest) => {
+    mappedRawChests.forEach((chest) => {
       if (!loadedChestIds.has(chest.id)) {
         const p = chest.fromPlayer || "Unknown";
         realTimeNewScans[p] = (realTimeNewScans[p] || 0) + 1;
@@ -643,7 +661,7 @@ export default function Dashboard() {
           ratePerWeek
         };
       });
-  }, [chests, rawChests, players, firstAppearances, totalAllTimeScans, loadedChestIds]);
+  }, [chests, mappedRawChests, players, firstAppearances, totalAllTimeScans, loadedChestIds]);
 
   const handleContributionSort = useCallback((field: ContributionSortField) => {
     if (contributionSortField === field) {
@@ -692,7 +710,7 @@ export default function Dashboard() {
       data[p] = initWeeklyStats();
     });
 
-    rawChests
+    mappedRawChests
       .filter((chest) => filterSource === "all" || chest.source === filterSource)
       .forEach((chest) => {
         const weekIdx = getWeekIndexForChest(chest.time, now);
@@ -710,7 +728,7 @@ export default function Dashboard() {
       total: stats.weeks.reduce((sum, n) => sum + n, 0),
       totalPoints: stats.weekPoints.reduce((sum, n) => sum + n, 0),
     }));
-  }, [rawChests, players, filterSource]);
+  }, [mappedRawChests, players, filterSource]);
 
   const handleWeeklySort = useCallback((field: WeeklySortField) => {
     if (weeklySortField === field) {
@@ -1060,24 +1078,24 @@ export default function Dashboard() {
     return Math.round(chests.length / uniqueDays);
   }, [chests]);
 
-  // Today's total chests (based on rawChests so it always reflects "today" regardless of the active date filter)
+  // Today's total chests (based on mappedRawChests so it always reflects "today" regardless of the active date filter)
   const todayTotal = useMemo(() => {
     const todayGameDayStr = getUTC10GameDayStr(new Date());
-    return rawChests.filter((c) => c.gameDay === todayGameDayStr).length;
-  }, [rawChests]);
+    return mappedRawChests.filter((c) => c.gameDay === todayGameDayStr).length;
+  }, [mappedRawChests]);
 
-  // Total Clan Wealth points across all chests in rawChests
+  // Total Clan Wealth points across all chests in mappedRawChests
   const totalWealth = useMemo(() => {
-    return rawChests.reduce((sum, chest) => sum + calculateChestPoints(chest.chestName, chest.source), 0);
-  }, [rawChests]);
+    return mappedRawChests.reduce((sum, chest) => sum + calculateChestPoints(chest.chestName, chest.source), 0);
+  }, [mappedRawChests]);
 
   // Today's Clan Wealth points across chests scanned today
   const todayWealth = useMemo(() => {
     const todayGameDayStr = getUTC10GameDayStr(new Date());
-    return rawChests
+    return mappedRawChests
       .filter((c) => c.gameDay === todayGameDayStr)
       .reduce((sum, chest) => sum + calculateChestPoints(chest.chestName, chest.source), 0);
-  }, [rawChests]);
+  }, [mappedRawChests]);
 
   // Whitelist filtering
   const filteredPlayers = players.filter((p) =>
