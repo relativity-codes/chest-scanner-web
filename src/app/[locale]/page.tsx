@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { parseChestLevel, calculateChestPoints } from "@/lib/chest-points";
+import TrendsTabContent from "./TrendsTabContent";
+import PlayerMiniTrend from "./PlayerMiniTrend";
 import {
   Activity,
   Users,
@@ -51,74 +56,6 @@ function formatUTC10Time(dateInput: string | Date): string {
   const minutes = String(d.getUTCMinutes()).padStart(2, '0');
   const seconds = String(d.getUTCSeconds()).padStart(2, '0');
   return `${hours}:${minutes}:${seconds}`;
-}
-
-function parseChestLevel(chestName: string, source: string): number {
-  const cn = chestName.toLowerCase();
-  const src = (source || "").toLowerCase();
-  const fullText = `${cn} ${src}`;
-
-  let level = 0;
-  const levelRegex = /(?:level|lvl|lvl\.|level\.)\s*(\d+)/i;
-  const match = fullText.match(levelRegex);
-  if (match) {
-    level = parseInt(match[1], 10);
-  } else {
-    const numMatch = fullText.match(/\b(5|10|15|20|25|30|35)\b/);
-    if (numMatch) {
-      level = parseInt(numMatch[1], 10);
-    }
-  }
-  return level;
-}
-
-function calculateChestPoints(chestName: string, source: string): number {
-  const cn = chestName.toLowerCase();
-  const src = (source || "").toLowerCase();
-  const fullText = `${cn} ${src}`;
-
-  const level = parseChestLevel(chestName, source);
-
-  // 2. Identify Category
-  const isLegendary = cn.includes("legendary") || cn.includes("gold");
-  const isCitadel = fullText.includes("citadel");
-  const isEpic = fullText.includes("epic") || fullText.includes("dragon");
-  const isRare = fullText.includes("rare") || cn.includes("minotaur") || cn.includes("wyvern");
-
-  if (isLegendary) {
-    return 1500;
-  }
-
-  if (isEpic) {
-    if (level <= 15) return 75;
-    if (level <= 20) return 598;
-    if (level <= 25) return 1000;
-    if (level <= 30) return 1184;
-    return 1484; // level 35
-  }
-
-  if (isRare) {
-    if (level <= 10) return 66;
-    if (level <= 15) return 130;
-    if (level <= 20) return 319;
-    if (level <= 25) return 800;
-    return 1200; // level 30
-  }
-
-  if (isCitadel) {
-    if (level <= 10) return 18;
-    if (level <= 15) return 30;
-    if (level <= 20) return 50;
-    if (level <= 25) return 120;
-    return 200; // level 30
-  }
-
-  // Fallback to Common Crypt
-  if (level <= 5) return 13;
-  if (level <= 10) return 35;
-  if (level <= 15) return 75;
-  if (level <= 20) return 167;
-  return 550; // level 25
 }
 
 interface PlayerFix {
@@ -394,6 +331,8 @@ const CircularProgress = ({ percent, color, label, count }: { percent: number; c
 };
 
 export default function Dashboard() {
+  const params = useParams();
+  const locale = params.locale as string;
   const t = useTranslations('Dashboard');
   const clanName = process.env.NEXT_PUBLIC_CLAN_NAME ?? 'ELF';
   const [rawChests, setRawChests] = useState<Chest[]>([]);
@@ -425,7 +364,7 @@ export default function Dashboard() {
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
-  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections" | "trends">("live");
   const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
   const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
   const [isConnected, setIsConnected] = useState(false);
@@ -1398,6 +1337,16 @@ export default function Dashboard() {
         >
           <ScanText className="w-3.5 h-3.5" />
           OCR Name Corrections
+        </button>
+        <button
+          onClick={() => setActiveTab("trends")}
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "trends"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
+          Historical Trends
         </button>
       </div>
 
@@ -2565,6 +2514,10 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      
+      {activeTab === "trends" && (
+        <TrendsTabContent players={players} />
+      )}
       {/* 5. PLAYER DETAILS MODAL */}
       {selectedPlayerDetail && (() => {
         // contributionsList is already memoized above
@@ -2685,6 +2638,11 @@ export default function Dashboard() {
                     {playerStats.ratePerWeek ? `${playerStats.ratePerWeek.toFixed(2)} / week` : "0.00 / week"}
                   </p>
                 </div>
+              </div>
+
+              {/* Mini Trend Graph */}
+              <div className="mb-5 sm:mb-6">
+                <PlayerMiniTrend player={selectedPlayerDetail} />
               </div>
 
               {/* Quality Distribution */}
