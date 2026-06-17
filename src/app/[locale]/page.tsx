@@ -354,7 +354,7 @@ export default function Dashboard() {
   const isDaily = filterDateRange === "today";
   const activeTarget = isDaily ? dailyTarget : weeklyTarget;
   const setActiveTarget = isDaily ? setDailyTarget : setWeeklyTarget;
-  const targetLabel = isDaily ? "Daily Target" : "Weekly Target";
+  const targetLabel = isDaily ? t('dailyTargetDynamic') : t('weeklyTargetDynamic');
 
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<string | null>(null);
 
@@ -861,11 +861,18 @@ export default function Dashboard() {
   const handleAddPlayer = async (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt("Enter administration passcode to whitelist player:");
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
       const res = await fetch("/api/whitelist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed, secretKey: deleteSecretKeyInput }),
+        body: JSON.stringify({ name: trimmed, secretKey: key }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -885,12 +892,30 @@ export default function Dashboard() {
   };
 
   const handleDeletePlayer = async (name: string) => {
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt(`Enter administration passcode to delete "${name}" from whitelist:`);
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
-      const res = await fetch(`/api/whitelist?name=${encodeURIComponent(name)}&secretKey=${encodeURIComponent(deleteSecretKeyInput)}`, {
+      const res = await fetch(`/api/whitelist?name=${encodeURIComponent(name)}&secretKey=${encodeURIComponent(key)}`, {
         method: "DELETE",
       });
       if (res.ok) {
         setPlayers((prev) => prev.filter((p) => p !== name));
+        setUnknownPlayers((prev) => {
+          if (prev.some((u) => u.ocrName === name)) return prev;
+          return [
+            ...prev,
+            {
+              id: `temp-${name}`,
+              ocrName: name,
+              encountered: new Date().toISOString(),
+            },
+          ];
+        });
       } else {
         const data = await res.json();
         alert(data.error || "Failed to remove player from whitelist. Please verify the admin secret key.");
@@ -902,12 +927,19 @@ export default function Dashboard() {
 
   // Moderation: Approve Unknown Player & remove from unknown log
   const handleApproveUnknownPlayer = async (ocrName: string) => {
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt(`Enter administration passcode to approve and whitelist "${ocrName}":`);
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
       // 1. Add to Whitelist
       const addRes = await fetch("/api/whitelist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: ocrName, secretKey: deleteSecretKeyInput }),
+        body: JSON.stringify({ name: ocrName, secretKey: key }),
       });
 
       if (addRes.ok) {
@@ -938,12 +970,19 @@ export default function Dashboard() {
   const handleAssignCorrection = async (ocrName: string, correctTo: string) => {
     const trimmedTo = correctTo.trim();
     if (!trimmedTo) return;
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt(`Enter administration passcode to map "${ocrName}" → "${trimmedTo}":`);
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
       // 1. Write PlayerFix mapping
       const fixRes = await fetch("/api/player-fixes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ocrName, correctedTo: trimmedTo }),
+        body: JSON.stringify({ ocrName, correctedTo: trimmedTo, secretKey: key }),
       });
 
       if (fixRes.ok) {
@@ -957,6 +996,9 @@ export default function Dashboard() {
 
         setUnknownPlayers((prev) => prev.filter((u) => u.ocrName !== ocrName));
         setSelectedUnknowns((prev) => prev.filter((name) => name !== ocrName));
+      } else {
+        const data = await fixRes.json();
+        alert(data.error || "Spelling mapping failed. Please verify the admin secret key.");
       }
     } catch (e) {
       console.error("Spelling mapping failed:", e);
@@ -965,47 +1007,46 @@ export default function Dashboard() {
 
   // Bulk Approve selected unknown players
   const handleBulkApprove = async () => {
-    if (selectedUnknowns.length === 0) return;
+    const count = selectedUnknowns.length;
+    if (count === 0) return;
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt(`Enter administration passcode to approve and whitelist ${count} players:`);
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
-      const approvedNames: string[] = [];
-      const newFirstAppearances: Record<string, string> = {};
-      let failed = false;
-      let errMsg = "";
-      
-      await Promise.all(selectedUnknowns.map(async (ocrName) => {
-        const addRes = await fetch("/api/whitelist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: ocrName, secretKey: deleteSecretKeyInput }),
+      // 1. Add to Whitelist in bulk
+      const addRes = await fetch("/api/whitelist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names: selectedUnknowns, secretKey: key }),
+      });
+
+      if (addRes.ok) {
+        // 2. Delete from Unknown logs in bulk
+        const namesQuery = selectedUnknowns.map((name) => encodeURIComponent(name)).join(",");
+        await fetch(`/api/unknown-players?ocrNames=${namesQuery}`, {
+          method: "DELETE",
         });
 
-        if (addRes.ok) {
-          const data = await addRes.json();
-          approvedNames.push(ocrName);
-          newFirstAppearances[ocrName] = data.createdAt || new Date().toISOString();
-          
-          await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(ocrName)}`, {
-            method: "DELETE",
+        setPlayers((prev) => [...prev, ...selectedUnknowns].sort());
+        setFirstAppearances((prev) => {
+          const updated = { ...prev };
+          const nowStr = new Date().toISOString();
+          selectedUnknowns.forEach((name) => {
+            if (!updated[name]) {
+              updated[name] = nowStr;
+            }
           });
-        } else {
-          failed = true;
-          const data = await addRes.json();
-          errMsg = data.error || "Approval failed.";
-        }
-      }));
-
-      if (approvedNames.length > 0) {
-        setPlayers((prev) => [...prev, ...approvedNames].sort());
-        setFirstAppearances((prev) => ({
-          ...prev,
-          ...newFirstAppearances,
-        }));
-        setUnknownPlayers((prev) => prev.filter((u) => !approvedNames.includes(u.ocrName)));
-      }
-      setSelectedUnknowns([]);
-
-      if (failed) {
-        alert(errMsg || "Some approvals failed. Please verify the admin secret key.");
+          return updated;
+        });
+        setUnknownPlayers((prev) => prev.filter((u) => !selectedUnknowns.includes(u.ocrName)));
+        setSelectedUnknowns([]);
+      } else {
+        const data = await addRes.json();
+        alert(data.error || "Approval failed. Please verify the admin secret key.");
       }
     } catch (e) {
       console.error("Bulk moderation whitelisting failed:", e);
@@ -1014,37 +1055,56 @@ export default function Dashboard() {
 
   // Bulk Assign Spelling Correction
   const handleBulkAssign = async () => {
-    if (selectedUnknowns.length === 0 || !bulkCorrectionTarget) return;
+    const count = selectedUnknowns.length;
+    if (count === 0 || !bulkCorrectionTarget) return;
+    let key = deleteSecretKeyInput;
+    if (!key) {
+      const enteredKey = prompt(`Enter administration passcode to map ${count} player(s) to "${bulkCorrectionTarget.trim()}":`);
+      if (enteredKey === null) return;
+      key = enteredKey;
+      setDeleteSecretKeyInput(enteredKey);
+    }
     try {
       const target = bulkCorrectionTarget.trim();
-      const newFixes: PlayerFix[] = [];
-      
-      await Promise.all(selectedUnknowns.map(async (name) => {
-        const fixRes = await fetch("/api/player-fixes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ocrName: name, correctedTo: target }),
-        });
-        if (fixRes.ok) {
-          const newFix = await fixRes.json();
-          newFixes.push(newFix);
-          await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(name)}`, {
-            method: "DELETE",
-          });
-        }
-      }));
 
-      setFixes((prev) => {
-        let current = [...prev];
-        newFixes.forEach((newFix) => {
-          current = [...current.filter((f) => f.ocrName !== newFix.ocrName), newFix];
-        });
-        return current;
+      // 1. Write PlayerFix mappings in bulk
+      const fixRes = await fetch("/api/player-fixes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ocrNames: selectedUnknowns, correctedTo: target, secretKey: key }),
       });
 
-      setUnknownPlayers((prev) => prev.filter((u) => !selectedUnknowns.includes(u.ocrName)));
-      setSelectedUnknowns([]);
-      setBulkCorrectionTarget("");
+      if (fixRes.ok) {
+        // 2. Delete from Unknown logs in bulk
+        const namesQuery = selectedUnknowns.map((name) => encodeURIComponent(name)).join(",");
+        await fetch(`/api/unknown-players?ocrNames=${namesQuery}`, {
+          method: "DELETE",
+        });
+
+        // Update local React states
+        setFixes((prev) => {
+          const timestamp = new Date().toISOString();
+          const newMappings = selectedUnknowns.map((name) => ({
+            id: `temp-${name}`,
+            ocrName: name,
+            correctedTo: target,
+            createdAt: timestamp,
+          }));
+          
+          let current = [...prev];
+          newMappings.forEach((newFix) => {
+            current = [...current.filter((f) => f.ocrName !== newFix.ocrName), newFix];
+          });
+          return current.sort((a, b) => a.ocrName.localeCompare(b.ocrName));
+        });
+
+        setUnknownPlayers((prev) => prev.filter((u) => !selectedUnknowns.includes(u.ocrName)));
+        setSelectedUnknowns([]);
+        setBulkCorrectionTarget("");
+      } else {
+        const data = await fixRes.json();
+        alert(data.error || "Spelling mapping failed. Please verify the admin secret key.");
+      }
     } catch (e) {
       console.error("Bulk spelling mapping failed:", e);
     }
@@ -1297,7 +1357,7 @@ export default function Dashboard() {
               : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-800"
               }`}
           >
-            Sound: {soundEnabled ? "ON" : "OFF"}
+            {t('sound', { status: soundEnabled ? t('soundOn') : t('soundOff') })}
           </button>
 
           {/* Connection badge */}
@@ -1308,12 +1368,12 @@ export default function Dashboard() {
             {isConnected ? (
               <>
                 <Wifi className="w-4 h-4 animate-pulse" />
-                <span className="font-semibold tracking-wide text-xs">RADAR LIVE</span>
+                <span className="font-semibold tracking-wide text-xs">{t('radarLive')}</span>
               </>
             ) : (
               <>
                 <WifiOff className="w-4 h-4" />
-                <span className="font-semibold tracking-wide text-xs">OFFLINE (RETRYING)</span>
+                <span className="font-semibold tracking-wide text-xs">{t('offline')}</span>
               </>
             )}
           </div>
@@ -1323,90 +1383,90 @@ export default function Dashboard() {
       {/* CORE STATISTICS CARDS */}
       <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-4 mb-6 md:mb-8">
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CHESTS LOGGED</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('totalChestsLogged')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{totalChests}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">scanned</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('scanned')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Database className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>CockroachDB Active</span>
+            <span>{t('cockroachActive')}</span>
           </div>
         </div>
 
         {/* CLAN WEALTH CARD */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL CLAN WEALTH</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('totalClanWealth')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{totalWealth.toLocaleString()}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">points</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('points')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Gem className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>Accumulated wealth 💎</span>
+            <span>{t('accumulatedWealth')}</span>
           </div>
         </div>
 
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">ACTIVE SCANNERS</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('activeScanners')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{activeScanners}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">players</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('players')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>Out of {players.length} active</span>
+            <span>{t('outOf', { count: players.length })}</span>
           </div>
         </div>
 
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">DAILY SCAN RATE</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('dailyScanRate')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{dailyAverage}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests/day</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('chestsPerDay')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>Computed dynamically</span>
+            <span>{t('computedDynamically')}</span>
           </div>
         </div>
 
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">MODERATION ALERTS</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('moderationAlerts')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className={`text-lg sm:text-2xl md:text-3xl font-black ${unknownPlayers.length > 0 ? "text-rose-500" : "text-emerald-400"}`} style={{ color: unknownPlayers.length > 0 ? "rgb(248, 113, 113)" : "rgb(52, 211, 153)" }}>
               {unknownPlayers.length}
             </span>
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-400">pending</span>
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-400">{t('pending')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <ShieldAlert className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${unknownPlayers.length > 0 ? "text-rose-500" : "text-emerald-400"}`} />
-            <span>Unknown names flagged</span>
+            <span>{t('unknownNamesFlagged')}</span>
           </div>
         </div>
 
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TODAY&apos;S CHESTS</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('todaysChests')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{todayTotal}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">total</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('total')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>UTC+10 game day</span>
+            <span>{t('utcGameDay')}</span>
           </div>
         </div>
 
         {/* TODAY'S WEALTH CARD */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl transition-all hover:border-amber-500/20 flex flex-col justify-between">
-          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TODAY&apos;S WEALTH</span>
+          <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">{t('todaysWealth')}</span>
           <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
             <span className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400">{todayWealth.toLocaleString()}</span>
-            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">points</span>
+            <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('points')}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
             <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500/70" />
-            <span>Today&apos;s active wealth 🔥</span>
+            <span>{t('todaysActiveWealth')}</span>
           </div>
         </div>
       </section>
@@ -1421,7 +1481,7 @@ export default function Dashboard() {
             }`}
         >
           <Activity className="w-3.5 h-3.5" />
-          Live Scanner Feed
+          {t('tabLive')}
         </button>
         <button
           onClick={() => setActiveTab("contributions")}
@@ -1431,7 +1491,7 @@ export default function Dashboard() {
             }`}
         >
           <Trophy className="w-3.5 h-3.5" />
-          Player Contributions
+          {t('tabContributions')}
         </button>
         <button
           onClick={() => setActiveTab("weekly")}
@@ -1441,7 +1501,7 @@ export default function Dashboard() {
             }`}
         >
           <BarChart3 className="w-3.5 h-3.5" />
-          Weekly History
+          {t('tabWeekly')}
         </button>
         <button
           onClick={() => setActiveTab("whitelist")}
@@ -1451,7 +1511,7 @@ export default function Dashboard() {
             }`}
         >
           <Users className="w-3.5 h-3.5" />
-          Clan Whitelist
+          {t('tabWhitelist')}
           {unknownPlayers.length > 0 && (
             <span className="bg-rose-500 text-white text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse flex-shrink-0">
               {unknownPlayers.length}
@@ -1466,7 +1526,7 @@ export default function Dashboard() {
             }`}
         >
           <ScanText className="w-3.5 h-3.5" />
-          OCR Name Corrections
+          {t('tabCorrections')}
         </button>
         <button
           onClick={() => setActiveTab("trends")}
@@ -1476,7 +1536,7 @@ export default function Dashboard() {
             }`}
         >
           <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
-          Historical Trends
+          {t('tabTrends')}
         </button>
       </div>
 
@@ -1490,17 +1550,17 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-3.5 sm:mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
-                <span className="text-sm font-bold tracking-wide text-slate-200">REAL-TIME INGESTION CARDS</span>
+                <span className="text-sm font-bold tracking-wide text-slate-200">{t('realTimeIngestion')}</span>
               </div>
-              <span className="text-xs text-slate-400 font-medium">Showing latest scans</span>
+              <span className="text-xs text-slate-400 font-medium">{t('showingLatestScans')}</span>
             </div>
 
             <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
               {chests.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
                   <Database className="w-12 h-12 stroke-[1.5] text-slate-600/70" />
-                  <p className="text-sm font-medium">No chest scans recorded yet.</p>
-                  <p className="text-xs text-slate-600">Start the Android mobile scanner overlay to log game drops.</p>
+                  <p className="text-sm font-medium">{t('noChestsYet')}</p>
+                  <p className="text-xs text-slate-600">{t('startScanner')}</p>
                 </div>
               ) : (
                 chests.slice(0, 100).map((chest, index) => {
@@ -1534,7 +1594,7 @@ export default function Dashboard() {
                           </div>
                           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-[11px] text-slate-400 mt-1">
                             <div>
-                              <span>Claimed by:</span>
+                              <span>{t('claimedBy')}</span>
                               <span className="font-bold text-slate-200 ml-1">{chest.fromPlayer}</span>
                             </div>
                             <span className="hidden sm:inline text-slate-700">•</span>
@@ -1562,11 +1622,11 @@ export default function Dashboard() {
           <div className="flex flex-col gap-5 lg:gap-6">
             {/* Visual SVG Distribution Charts */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5">
-              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3.5 sm:mb-4 uppercase font-cinzel text-gold">CHEST QUALITY SHARE</h2>
+              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3.5 sm:mb-4 uppercase font-cinzel text-gold">{t('chestQualityShare')}</h2>
 
               {chests.length === 0 ? (
                 <div className="h-44 flex items-center justify-center text-xs text-slate-500">
-                  Waiting for database records to map analytics...
+                  {t('waitingForRecords')}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-3.5">
@@ -1606,11 +1666,11 @@ export default function Dashboard() {
 
             {/* Top Contributor list */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col">
-              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">TOP ACTIVE SCANNERS</h2>
+              <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">{t('topActiveScanners')}</h2>
               <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
                 {chests.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-slate-500">
-                    No scanner ranking metrics available.
+                    {t('noScannerMetrics')}
                   </div>
                 ) : (
                   Object.entries(
@@ -1633,7 +1693,7 @@ export default function Dashboard() {
                           </span>
                           <span className="font-semibold text-slate-200">{name}</span>
                         </div>
-                        <span className="font-mono font-bold text-amber-500">{count} drops</span>
+                        <span className="font-mono font-bold text-amber-500">{count} {t('dropsUnit')}</span>
                       </div>
                     ))
                 )}
@@ -1656,40 +1716,40 @@ export default function Dashboard() {
             {/* Highlights Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
               <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏆 TOP PRODUCER</span>
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('topProducer')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-lg md:text-2xl font-black text-gold truncate max-w-[140px] sm:max-w-[200px]">{topContributor}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topContributorPoints.toLocaleString()} wealth</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topContributorPoints.toLocaleString()} {t('wealthUnit', { points: '' }).replace(' ', '')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>Leads the {clanName} contribution board</span>
+                  <span>{t('leadsBoard', { clanName })}</span>
                 </div>
               </div>
 
               <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">📊 AVERAGE CONTRIBUTION</span>
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('avgContribution')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{averageChestsPerPlayer}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests/member</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('chestsPerMember')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>Calculated across active roster</span>
+                  <span>{t('calculatedAcrossRoster')}</span>
                 </div>
               </div>
 
               <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏹 ACTIVE CONTRIBUTION RATE</span>
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('activeContributionRate')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">
                     {contributionsList.filter(c => c.total > 0).length}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} active</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} {t('activeOf', { count: '' }).replace('/ ', '').replace('  ', '').trim()}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>At least 1 registered drop</span>
+                  <span>{t('atLeastOneDrop')}</span>
                 </div>
               </div>
             </div>
@@ -1697,8 +1757,8 @@ export default function Dashboard() {
             {/* Leaderboard Grid */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
               <div className="flex flex-col gap-1.5 mb-3.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">🏆 {clanName} MEMBER CONTRIBUTIONS LEADERBOARD</h2>
-                <p className="text-[11px] sm:text-xs text-slate-400">Real-time statistics aggregating total monster and crypt chest claims.</p>
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">{t('leaderboardTitle', { clanName })}</h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">{t('leaderboardSubtitle')}</p>
               </div>
 
               <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
@@ -1727,23 +1787,23 @@ export default function Dashboard() {
                   {/* Date range filter */}
                   <div className="flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-slate-400 font-semibold">Date Range:</span>
+                    <span className="text-slate-400 font-semibold">{t('dateRangeLabel')}</span>
                     <select
                       value={filterDateRange}
                       onChange={(e) => setFilterDateRange(e.target.value)}
                       className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
                     >
-                      <option value="all">Last 5 Weeks</option>
-                      <option value="today">Today (UTC+10)</option>
-                      <option value="week">Past 7 Days</option>
-                      <option value="month">Past 30 Days</option>
+                      <option value="all">{t('last5Weeks')}</option>
+                      <option value="today">{t('todayUtc')}</option>
+                      <option value="week">{t('past7Days')}</option>
+                      <option value="month">{t('past30Days')}</option>
                     </select>
                   </div>
 
                   {/* Daily target input */}
                   <div className="flex items-center gap-1.5">
                     <Target className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-slate-400 font-semibold">Daily Target:</span>
+                    <span className="text-slate-400 font-semibold">{t('dailyTargetLabel')}</span>
                     <input
                       type="number"
                       value={dailyTarget || ""}
@@ -1755,7 +1815,7 @@ export default function Dashboard() {
                   {/* Weekly target input */}
                   <div className="flex items-center gap-1.5">
                     <Target className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-slate-400 font-semibold">Weekly Target:</span>
+                    <span className="text-slate-400 font-semibold">{t('weeklyTargetLabel')}</span>
                     <input
                       type="number"
                       value={weeklyTarget || ""}
@@ -1819,49 +1879,49 @@ export default function Dashboard() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-slate-850 text-slate-450 font-bold uppercase tracking-wider font-cinzel">
-                      <th className="py-3 px-4 w-16 text-slate-450">Rank</th>
-                      <th className="py-3 px-4 text-slate-455">Player Name</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Epic Crypt 🐉</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Rare Crypt 💀</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Common Crypt 📦</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Citadel 🏰</th>
-                      <th className="py-3 px-4 text-center text-slate-455">Other 🌀</th>
+                      <th className="py-3 px-4 w-16 text-slate-450">{t('rankCol')}</th>
+                      <th className="py-3 px-4 text-slate-455">{t('playerNameCol')}</th>
+                      <th className="py-3 px-4 text-center text-slate-455">{t('epicCryptCol')}</th>
+                      <th className="py-3 px-4 text-center text-slate-455">{t('rareCryptCol')}</th>
+                      <th className="py-3 px-4 text-center text-slate-455">{t('commonCryptCol')}</th>
+                      <th className="py-3 px-4 text-center text-slate-455">{t('citadelCol')}</th>
+                      <th className="py-3 px-4 text-center text-slate-455">{t('otherCol')}</th>
                       <SortableTh field="points" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center font-bold text-amber-500 text-slate-455">
-                        Clan Wealth 💎
+                        {t('clanWealthCol')}
                       </SortableTh>
                       <SortableTh field="total" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center font-bold text-gold text-slate-455">
-                        Total Drops
+                        {t('totalDropsCol')}
                       </SortableTh>
                       <SortableTh field="ratePerDay" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455">
-                        Rate/Day
+                        {t('ratePerDayCol')}
                       </SortableTh>
                       <SortableTh field="ratePerWeek" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455">
-                        Rate/Week
+                        {t('ratePerWeekCol')}
                       </SortableTh>
                       <SortableTh field="todayCount" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455 w-32">
-                        Daily Target ({dailyTarget})
+                        {t('dailyTargetCol', { target: dailyTarget })}
                       </SortableTh>
                       <SortableTh field="weeklyCount" activeField={contributionSortField} direction={contributionSortDirection} onSort={handleContributionSort} className="py-3 px-4 text-center text-slate-455 w-32">
-                        Weekly Target ({weeklyTarget})
+                        {t('weeklyTargetCol', { target: weeklyTarget })}
                       </SortableTh>
-                      <th className="py-3 px-4 w-40 text-slate-455">Status Level</th>
+                      <th className="py-3 px-4 w-40 text-slate-455">{t('statusLevelCol')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedContributionsList.map((item, idx) => {
-                        let statusText = "Recruit";
+                        let statusText = t('statusRecruit');
                         let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
                         if (item.total >= 30) {
-                          statusText = "Elite Raider";
+                          statusText = t('statusEliteRaider');
                           statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
                         } else if (item.total >= 15) {
-                          statusText = "Heavy Raider";
+                          statusText = t('statusHeavyRaider');
                           statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
                         } else if (item.total >= 5) {
-                          statusText = "Active Member";
+                          statusText = t('statusActiveMember');
                           statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
                         } else if (item.total > 0) {
-                          statusText = "Contributor";
+                          statusText = t('statusContributor');
                           statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
                         }
 
@@ -1899,7 +1959,7 @@ export default function Dashboard() {
                                   </span>
                                   <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
                                     <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-purple-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Epic Levels</span>
+                                      <span className="font-bold text-[9px] text-purple-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('epicLevels')}</span>
                                       {Object.entries(item.epicCrypt.levels)
                                         .sort((a, b) => Number(a[0]) - Number(b[0]))
                                         .map(([lvl, count]) => (
@@ -1920,7 +1980,7 @@ export default function Dashboard() {
                                   </span>
                                   <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
                                     <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-sky-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Rare Levels</span>
+                                      <span className="font-bold text-[9px] text-sky-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('rareLevels')}</span>
                                       {Object.entries(item.rareCrypt.levels)
                                         .sort((a, b) => Number(a[0]) - Number(b[0]))
                                         .map(([lvl, count]) => (
@@ -1941,7 +2001,7 @@ export default function Dashboard() {
                                   </span>
                                   <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
                                     <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Common Levels</span>
+                                      <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('commonLevels')}</span>
                                       {Object.entries(item.commonCrypt.levels)
                                         .sort((a, b) => Number(a[0]) - Number(b[0]))
                                         .map(([lvl, count]) => (
@@ -1962,7 +2022,7 @@ export default function Dashboard() {
                                   </span>
                                   <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
                                     <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-cyan-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Citadel Levels</span>
+                                      <span className="font-bold text-[9px] text-cyan-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('citadelLevels')}</span>
                                       {Object.entries(item.citadel.levels)
                                         .sort((a, b) => Number(a[0]) - Number(b[0]))
                                         .map(([lvl, count]) => (
@@ -1983,7 +2043,7 @@ export default function Dashboard() {
                                   </span>
                                   <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
                                     <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-slate-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">Other Levels</span>
+                                      <span className="font-bold text-[9px] text-slate-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('otherLevels')}</span>
                                       {Object.entries(item.other.levels)
                                         .sort((a, b) => Number(a[0]) - Number(b[0]))
                                         .map(([lvl, count]) => (
@@ -2029,8 +2089,8 @@ export default function Dashboard() {
                             </td>
                             <td className="py-3 px-4 text-center">
                               {item.weeklyCount >= weeklyTarget ? (
-                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                                  Met ✅
+                                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                  {t('metTarget')}
                                 </span>
                               ) : (
                                 <div className="flex flex-col items-center gap-1">
@@ -2066,19 +2126,19 @@ export default function Dashboard() {
                     else if (idx === 1) rankBadge = "🥈";
                     else if (idx === 2) rankBadge = "🥉";
 
-                    let statusText = "Recruit";
+                    let statusText = t('statusRecruit');
                     let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
                     if (item.total >= 30) {
-                      statusText = "Elite Raider";
+                      statusText = t('statusEliteRaider');
                       statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
                     } else if (item.total >= 15) {
-                      statusText = "Heavy Raider";
+                      statusText = t('statusHeavyRaider');
                       statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
                     } else if (item.total >= 5) {
-                      statusText = "Active Member";
+                      statusText = t('statusActiveMember');
                       statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
                     } else if (item.total > 0) {
-                      statusText = "Contributor";
+                      statusText = t('statusContributor');
                       statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
                     }
 
@@ -2104,39 +2164,39 @@ export default function Dashboard() {
                         {/* Stats grid */}
                         <div className="grid grid-cols-3 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Epic 🐉</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('epicMobile')}</span>
                             <span className="font-mono font-bold text-purple-400">{item.epicCrypt.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rare 💀</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('rareMobile')}</span>
                             <span className="font-mono font-bold text-sky-400">{item.rareCrypt.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Com 📦</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('commonMobile')}</span>
                             <span className="font-mono font-bold text-emerald-400">{item.commonCrypt.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Citadel 🏰</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('citadelMobile')}</span>
                             <span className="font-mono font-bold text-cyan-400">{item.citadel.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Other 🌀</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('otherMobile')}</span>
                             <span className="font-mono font-bold text-slate-500">{item.other.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Total 🏆</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('totalMobile')}</span>
                             <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Wealth 💎</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('wealthMobile')}</span>
                             <span className="font-mono font-bold text-amber-500 text-xs">{item.points.toLocaleString()}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rate/Day ⏱️</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerDayMobile')}</span>
                             <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerDay.toFixed(1)}</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">Rate/Week 📈</span>
+                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerWeekMobile')}</span>
                             <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerWeek.toFixed(1)}</span>
                           </div>
                         </div>
@@ -2145,7 +2205,7 @@ export default function Dashboard() {
                         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-900/40 text-[9px] sm:text-[10px]">
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-medium">Daily ({dailyTarget})</span>
+                              <span className="text-slate-400 font-medium">{t('dailyLabel', { target: dailyTarget })}</span>
                               {item.todayCount >= dailyTarget ? (
                                 <span className="font-bold text-emerald-400">Met ✅</span>
                               ) : (
@@ -2162,7 +2222,7 @@ export default function Dashboard() {
 
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-medium">Weekly ({weeklyTarget})</span>
+                              <span className="text-slate-400 font-medium">{t('weeklyLabel', { target: weeklyTarget })}</span>
                               {item.weeklyCount >= weeklyTarget ? (
                                 <span className="font-bold text-emerald-400">Met ✅</span>
                               ) : (
@@ -2216,12 +2276,12 @@ export default function Dashboard() {
           <div className="flex flex-col gap-5 lg:gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
               <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🏆 TOP THIS WEEK</span>
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('topThisWeek')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-lg md:text-2xl font-black text-gold truncate max-w-[140px] sm:max-w-[200px]">
                     {topThisWeek?.player || "None"}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topThisWeek?.weeks[0] || 0} drops</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{topThisWeek?.weeks[0] || 0} {t('dropsUnit')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
@@ -2233,46 +2293,46 @@ export default function Dashboard() {
                 <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">📊 5-WEEK CLAN TOTAL</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{clanWeeklyTotal.toLocaleString()}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">drops</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">{t('dropsUnit')}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>Across all tracked members</span>
+                  <span>{t('calculatedAcrossRoster')}</span>
                 </div>
               </div>
 
               <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">🎯 MET WEEKLY TARGET</span>
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('weeklyTargetMetCard')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{metTargetThisWeek}</span>
                   <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} ({weeklyTarget}/wk)</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
-                  <span>Members hitting target this week</span>
+                  <span>{t('metThisWeek')}</span>
                 </div>
               </div>
             </div>
 
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
               <div className="flex flex-col gap-1.5 mb-3.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">📈 {clanName} WEEKLY CONTRIBUTION HISTORY</h2>
-                <p className="text-[11px] sm:text-xs text-slate-400">Drop counts per player for the last 5 rolling weeks (UTC+10).</p>
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">{t('weeklyLeaderboard', { clanName })}</h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">{t('weeklySubtitle')}</p>
               </div>
 
               <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
                 <div className="flex flex-wrap gap-2.5 sm:gap-3 items-center text-[11px] sm:text-xs">
                   <div className="flex items-center gap-1.5">
                     <Filter className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-slate-400 font-semibold">Source:</span>
+                    <span className="text-slate-400 font-semibold">{t('sourceLabel')}</span>
                     <select
                       value={filterSource}
                       onChange={(e) => setFilterSource(e.target.value)}
                       className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-350 focus:outline-none focus:border-amber-500/50"
                     >
-                      <option value="all">All Sources</option>
-                      <option value="Crypt">Crypts</option>
-                      <option value="Monster">Monsters</option>
+                      <option value="all">{t('allSources')}</option>
+                      <option value="Crypt">{t('crypts')}</option>
+                      <option value="Monster">{t('monsters')}</option>
                       <option value="PvP">PvP</option>
                       <option value="Arena">Arena</option>
                       <option value="Tower">Tower</option>
@@ -2288,14 +2348,14 @@ export default function Dashboard() {
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
                   >
                     <Download className="w-4 h-4" />
-                    Export CSV
+                    {t('exportWeeklyCsv')}
                   </button>
 
                   <div className="relative w-full md:w-auto">
                     <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Search player..."
+                      placeholder={t('searchPlayer')}
                       value={playerSearchQuery}
                       onChange={(e) => setPlayerSearchQuery(e.target.value)}
                       className="pl-9 pr-4 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-full md:w-56"
@@ -2308,8 +2368,8 @@ export default function Dashboard() {
                 <table className="w-full text-left text-xs border-collapse min-w-[900px]">
                   <thead>
                     <tr className="border-b border-slate-850 text-slate-450 font-bold uppercase tracking-wider font-cinzel">
-                      <th className="py-3 px-4 w-16 text-slate-450">Rank</th>
-                      <th className="py-3 px-4 text-slate-455">Player Name</th>
+                      <th className="py-3 px-4 w-16 text-slate-450">{t('rankCol')}</th>
+                      <th className="py-3 px-4 text-slate-455">{t('playerNameCol')}</th>
                       {weekBuckets.map((week) =>
                         weeklySortableTh(
                           `week${week.index}` as WeeklySortField,
@@ -2320,7 +2380,7 @@ export default function Dashboard() {
                           </span>
                         )
                       )}
-                      {weeklySortableTh("total", "py-3 px-4 text-center font-bold text-gold text-slate-455", "5-Wk Total")}
+                      {weeklySortableTh("total", "py-3 px-4 text-center font-bold text-gold text-slate-455", t('total5W'))}
                     </tr>
                   </thead>
                   <tbody>
@@ -2396,7 +2456,7 @@ export default function Dashboard() {
                             {item.player}
                           </button>
                         </div>
-                        <span className="font-mono font-bold text-gold text-xs">{item.total} total</span>
+                        <span className="font-mono font-bold text-gold text-xs">{item.total} {t('dropsUnit')}</span>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-[9px] sm:text-[10px]">
@@ -2432,14 +2492,14 @@ export default function Dashboard() {
                 <Lock className="w-5 h-5 text-amber-500" />
               </div>
               <div>
-                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wide">Roster Administration Passcode</h3>
-                <p className="text-[10px] text-slate-400">Required to add, approve, map, or delete clan members on the whitelist.</p>
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wide">{t('rosterAdminPasscode')}</h3>
+                <p className="text-[10px] text-slate-400">{t('rosterAdminDesc')}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <input
                 type="password"
-                placeholder="Enter admin passcode"
+                placeholder={t('enterAdminPasscode')}
                 value={deleteSecretKeyInput}
                 onChange={(e) => setDeleteSecretKeyInput(e.target.value)}
                 className="px-3 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-650 focus:outline-none focus:border-amber-500/50 w-full sm:w-48"
@@ -2452,8 +2512,8 @@ export default function Dashboard() {
             <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
                 <div>
-                  <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">CLAN MEMBER ROSTER ({players.length})</h2>
-                  <p className="text-xs text-slate-400">Only players in this list will be processed without alerts.</p>
+                  <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">{t('clanMemberRoster', { count: players.length })}</h2>
+                  <p className="text-xs text-slate-400">{t('rosterDesc')}</p>
                 </div>
 
                 {/* Add and Search inputs */}
@@ -2462,7 +2522,7 @@ export default function Dashboard() {
                     <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      placeholder="Search roster..."
+                      placeholder={t('searchRoster')}
                       value={playerSearchQuery}
                       onChange={(e) => setPlayerSearchQuery(e.target.value)}
                       className="pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-44"
@@ -2472,7 +2532,7 @@ export default function Dashboard() {
                   <div className="flex gap-1.5 w-full sm:w-auto">
                     <input
                       type="text"
-                      placeholder="Add player tag..."
+                      placeholder={t('addPlayerTag')}
                       value={newPlayerName}
                       onChange={(e) => setNewPlayerName(e.target.value)}
                       className="flex-1 sm:flex-none px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-36"
@@ -2491,7 +2551,7 @@ export default function Dashboard() {
               <div className="flex-1 overflow-y-auto pr-1">
                 {filteredPlayers.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-slate-500 text-xs">
-                    No clan members matched &quot;{playerSearchQuery}&quot; or roster is empty.
+                    {t('noMembersMatched', { query: playerSearchQuery })}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
@@ -2504,7 +2564,7 @@ export default function Dashboard() {
                         <button
                           onClick={() => handleDeletePlayer(player)}
                           className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all"
-                          title="Remove from roster"
+                          title={t('reverseApproval')}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -2519,17 +2579,17 @@ export default function Dashboard() {
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden border-rose-500/15">
               <div className="flex items-center gap-2 mb-2">
                 <ShieldAlert className="w-5 h-5 text-rose-400" />
-                <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">MODERATION QUEUE</h2>
+                <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">{t('moderationQueue')}</h2>
               </div>
               <p className="text-[11px] text-slate-400 mb-4 leading-normal">
-                OCR-scanned names not on the whitelist. Select multiple names to map them to an existing player or approve them directly.
+                {t('moderationQueueDesc')}
               </p>
 
               <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-1">
                 {/* Step 1: Select Misspelled Names from Dropdown */}
                 <div className="flex flex-col gap-1.5 relative shrink-0" ref={unknownsDropdownRef}>
                   <label className="text-[10px] font-black text-rose-400 uppercase tracking-wider">
-                    1. Select Misspelled Names ({unknownPlayers.length} in queue):
+                    {t('step1Label', { count: unknownPlayers.length })}:
                   </label>
                   
                   <button
@@ -2539,8 +2599,8 @@ export default function Dashboard() {
                   >
                     <span className="truncate">
                       {selectedUnknowns.length === 0
-                        ? "Choose misspelled names..."
-                        : `${selectedUnknowns.length} name(s) selected`}
+                        ? t('chooseMisspelled')
+                        : t('namesSelected', { count: selectedUnknowns.length })}
                     </span>
                     <ChevronDown className="w-4 h-4 text-slate-500" />
                   </button>
@@ -2550,7 +2610,7 @@ export default function Dashboard() {
                       <div className="p-2 border-b border-slate-900 shrink-0">
                         <input
                           type="text"
-                          placeholder="Search queue..."
+                          placeholder={t('searchQueue')}
                           value={unknownsSearchQuery}
                           onChange={(e) => setUnknownsSearchQuery(e.target.value)}
                           className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-rose-500/50"
@@ -2559,7 +2619,7 @@ export default function Dashboard() {
                       <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
                         {filteredUnknowns.length === 0 ? (
                           <div className="p-2 text-center text-xs text-slate-500">
-                            No matching names in queue.
+                            {t('noMatchingNames')}
                           </div>
                         ) : (
                           filteredUnknowns.map((u) => {
@@ -2597,13 +2657,13 @@ export default function Dashboard() {
                 {selectedUnknowns.length > 0 && (
                   <div className="flex flex-col gap-1.5 shrink-0">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-bold text-slate-400">SELECTED NAMES:</span>
+                      <span className="text-[10px] font-bold text-slate-400">{t('selectedNamesLabel')}</span>
                       <button
                         type="button"
                         onClick={() => setSelectedUnknowns([])}
                         className="text-[10px] font-bold text-rose-400 hover:text-rose-300 underline"
                       >
-                        Clear All
+                        {t('clearAll')}
                       </button>
                     </div>
                     <div className="flex flex-wrap gap-1.5 p-2 bg-slate-950/40 border border-slate-900/60 rounded-xl max-h-24 overflow-y-auto">
@@ -2629,14 +2689,14 @@ export default function Dashboard() {
                 {/* Step 2: Select Correct Player Roster Target */}
                 <div className="flex flex-col gap-1.5 shrink-0">
                   <label className="text-[10px] font-black text-amber-400 uppercase tracking-wider">
-                    2. Map to Whitelisted Player (Optional):
+                    {t('step2Label')}
                   </label>
                   <select
                     value={bulkCorrectionTarget}
                     onChange={(e) => setBulkCorrectionTarget(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500/50"
                   >
-                    <option value="">-- Choose correct member --</option>
+                    <option value="">{t('chooseCorrectMember')}</option>
                     {sortedWhitelistNames.map((name) => (
                       <option key={name} value={name}>
                         {name}
@@ -2654,12 +2714,12 @@ export default function Dashboard() {
                     className="w-full py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5"
                   >
                     <ArrowRight className="w-4 h-4" />
-                    MAP SELECTED ({selectedUnknowns.length}) TO {bulkCorrectionTarget || "..."}
+                    {t('mapSelected', { count: selectedUnknowns.length, target: bulkCorrectionTarget || "..." })}
                   </button>
 
                   <div className="flex items-center justify-between text-[10px] text-slate-550 my-1">
                     <span className="h-px bg-slate-900 flex-1"></span>
-                    <span className="px-2 font-bold uppercase tracking-wider text-slate-500">OR</span>
+                    <span className="px-2 font-bold uppercase tracking-wider text-slate-500">{t('orDivider')}</span>
                     <span className="h-px bg-slate-900 flex-1"></span>
                   </div>
 
@@ -2670,7 +2730,7 @@ export default function Dashboard() {
                     className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all flex-shrink-0 flex items-center justify-center gap-1.5"
                   >
                     <Users className="w-4 h-4" />
-                    APPROVE & ADD SELECTED AS NEW MEMBERS
+                    {t('approveAddBtn')}
                   </button>
                 </div>
               </div>
@@ -2684,15 +2744,15 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
           {/* Main Corrections List */}
           <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
-            <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide mb-1">OCR CORRECTIONS DICTIONARY ({fixes.length})</h2>
+            <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide mb-1">{t('ocrDictionary', { count: fixes.length })}</h2>
             <p className="text-xs text-slate-400 mb-5 leading-normal">
-              Corrects common character-swapping and OCR noise. Scanned variants in the left column will automatically resolve to the whitelisted tag on the right.
+              {t('ocrDictionaryDesc')}
             </p>
 
             <div className="flex-1 overflow-y-auto pr-1">
               {fixes.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 text-xs">
-                  No OCR spelling corrections mapped.
+                  {t('noOcrCorrections')}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
@@ -2710,7 +2770,7 @@ export default function Dashboard() {
                       <button
                         onClick={() => handleDeleteFix(fix.ocrName)}
                         className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all flex-shrink-0"
-                        title="Delete correction mapping"
+                        title={t('deleteCorrectionTitle')}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -2725,15 +2785,15 @@ export default function Dashboard() {
           <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[320px]">
             <div className="flex items-center gap-2 mb-3">
               <BookOpen className="w-5 h-5 text-amber-500" />
-              <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">ADD CORRECTION</h2>
+              <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">{t('addCorrection')}</h2>
             </div>
 
             <div className="flex flex-col gap-4 text-xs mt-2">
               <div className="flex flex-col gap-1.5">
-                <label className="font-bold text-slate-400">OCR MISPELLING / ERROR:</label>
+                <label className="font-bold text-slate-400">{t('ocrMisspellingLabel')}</label>
                 <input
                   type="text"
-                  placeholder="e.g. Relativty"
+                  placeholder={t('ocrMisspellingPlaceholder')}
                   value={ocrErrorInput}
                   onChange={(e) => setOcrErrorInput(e.target.value)}
                   className="px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 font-mono"
@@ -2741,10 +2801,10 @@ export default function Dashboard() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="font-bold text-slate-400">CORRECT TAG TO MAP TO:</label>
+                <label className="font-bold text-slate-400">{t('ocrCorrectTagLabel')}</label>
                 <input
                   type="text"
-                  placeholder="e.g. Relativity"
+                  placeholder={t('ocrCorrectTagPlaceholder')}
                   value={ocrCorrectToInput}
                   onChange={(e) => setOcrCorrectToInput(e.target.value)}
                   className="px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50"
@@ -2756,7 +2816,7 @@ export default function Dashboard() {
                 className="w-full mt-2 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold transition-all shadow-md shadow-amber-500/10 uppercase tracking-wide flex items-center justify-center gap-1.5"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
-                <span>SAVE MAPPING</span>
+                <span>{t('saveMapping')}</span>
               </button>
             </div>
           </div>
@@ -2793,19 +2853,19 @@ export default function Dashboard() {
         });
 
         // status badge
-        let statusText = "Recruit";
+        let statusText = t('statusRecruit');
         let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
         if (playerStats.total >= 30) {
-          statusText = "Elite Raider";
+          statusText = t('statusEliteRaider');
           statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
         } else if (playerStats.total >= 15) {
-          statusText = "Heavy Raider";
+          statusText = t('statusHeavyRaider');
           statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
         } else if (playerStats.total >= 5) {
-          statusText = "Active Member";
+          statusText = t('statusActiveMember');
           statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
         } else if (playerStats.total > 0) {
-          statusText = "Contributor";
+          statusText = t('statusContributor');
           statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
         }
 
@@ -2830,29 +2890,29 @@ export default function Dashboard() {
                       {statusText}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400">{clanName} Clan Member Stats</p>
+                  <p className="text-xs text-slate-400">{t('clanMemberStats', { clanName })}</p>
                 </div>
               </div>
 
               {/* Rarity breakdown */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5 sm:mb-6 text-center">
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
-                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Clan Wealth</span>
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">{t('clanWealthLabel')}</span>
                   <p className="text-base sm:text-lg font-black text-amber-500 mt-0.5 sm:mt-1">{playerStats.points.toLocaleString()} 💎</p>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
-                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Total Scanned</span>
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">{t('totalScanned')}</span>
                   <p className="text-base sm:text-lg font-black text-slate-100 mt-0.5 sm:mt-1">{playerStats.total}</p>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
-                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Daily Target</span>
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">{t('dailyTargetStat')}</span>
                   <p className="text-xs sm:text-sm font-black text-gold mt-0.5 sm:mt-1">
                     {playerStats.todayCount} / {dailyTarget}
                     <span className="text-[9px] sm:text-[10px] text-slate-450 block mt-0.5">({Math.min(100, Math.round((playerStats.todayCount / dailyTarget) * 100))}%)</span>
                   </p>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-900 rounded-lg sm:rounded-xl p-2 sm:p-3 flex flex-col justify-center">
-                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">Weekly Target</span>
+                  <span className="text-[8.5px] sm:text-[9px] text-slate-550 font-bold uppercase block">{t('weeklyTargetStat')}</span>
                   <p className="text-xs sm:text-sm font-black text-gold mt-0.5 sm:mt-1">
                     {playerStats.weeklyCount} / {weeklyTarget}
                     <span className="text-[9px] sm:text-[10px] text-slate-450 block mt-0.5">({Math.min(100, Math.round((playerStats.weeklyCount / weeklyTarget) * 100))}%)</span>
@@ -2863,27 +2923,27 @@ export default function Dashboard() {
               {/* System Activity & Rates */}
               <div className="grid grid-cols-2 gap-3 mb-5 sm:mb-6 text-xs bg-slate-950/30 p-3 rounded-lg border border-slate-900/50">
                 <div className="space-y-1 text-left">
-                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">First Appearance</span>
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">{t('firstAppearance')}</span>
                   <p className="text-slate-200 font-mono font-bold">
-                    {firstAppearances[selectedPlayerDetail] ? new Date(firstAppearances[selectedPlayerDetail]).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A"}
+                    {firstAppearances[selectedPlayerDetail] ? new Date(firstAppearances[selectedPlayerDetail]).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : t('naValue')}
                   </p>
                 </div>
                 <div className="space-y-1 text-left">
-                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Active Duration</span>
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">{t('activeDuration')}</span>
                   <p className="text-slate-200 font-bold">
-                    {firstAppearances[selectedPlayerDetail] ? `${getDaysOnSystem(firstAppearances[selectedPlayerDetail], new Date())} days` : "N/A"}
+                    {firstAppearances[selectedPlayerDetail] ? t('daysActive', { days: getDaysOnSystem(firstAppearances[selectedPlayerDetail], new Date()) }) : t('naValue')}
                   </p>
                 </div>
                 <div className="space-y-1 text-left">
-                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Average Rate/Day</span>
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">{t('avgRateDay')}</span>
                   <p className="text-amber-500 font-mono font-black text-sm">
-                    {playerStats.ratePerDay ? `${playerStats.ratePerDay.toFixed(2)} / day` : "0.00 / day"}
+                    {playerStats.ratePerDay ? t('rateDay', { rate: playerStats.ratePerDay.toFixed(2) }) : t('rateDay', { rate: '0.00' })}
                   </p>
                 </div>
                 <div className="space-y-1 text-left">
-                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">Average Rate/Week</span>
+                  <span className="text-slate-500 font-bold uppercase block text-[8.5px] sm:text-[9px]">{t('avgRateWeek')}</span>
                   <p className="text-amber-500 font-mono font-black text-sm">
-                    {playerStats.ratePerWeek ? `${playerStats.ratePerWeek.toFixed(2)} / week` : "0.00 / week"}
+                    {playerStats.ratePerWeek ? t('rateWeek', { rate: playerStats.ratePerWeek.toFixed(2) }) : t('rateWeek', { rate: '0.00' })}
                   </p>
                 </div>
               </div>
@@ -2895,15 +2955,15 @@ export default function Dashboard() {
 
               {/* Quality Distribution */}
               <div className="mb-6">
-                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Chest Quality Share</h3>
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">{t('chestQualityShareModal')}</h3>
                 {playerStats.total === 0 ? (
-                  <p className="text-xs text-slate-500">No scanned chests recorded for this player.</p>
+                  <p className="text-xs text-slate-500">{t('noScansForPlayer')}</p>
                 ) : (
                   <div className="flex flex-col gap-3 text-xs">
                     {/* Epic Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-purple-400">Epic Crypt</span>
+                        <span className="font-bold text-purple-400">{t('epicCrypt')}</span>
                         <span className="text-slate-400">{playerStats.epicCrypt.total} ({Math.round((playerStats.epicCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
@@ -2924,7 +2984,7 @@ export default function Dashboard() {
                     {/* Rare Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-blue-400">Rare Crypt</span>
+                        <span className="font-bold text-blue-400">{t('rareCrypt')}</span>
                         <span className="text-slate-400">{playerStats.rareCrypt.total} ({Math.round((playerStats.rareCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
@@ -2945,7 +3005,7 @@ export default function Dashboard() {
                     {/* Common Crypt */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-green-400">Common Crypt</span>
+                        <span className="font-bold text-green-400">{t('commonCrypt')}</span>
                         <span className="text-slate-400">{playerStats.commonCrypt.total} ({Math.round((playerStats.commonCrypt.total / playerStats.total) * 100)}%)</span>
                       </div>
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
@@ -2966,7 +3026,7 @@ export default function Dashboard() {
                     {/* Citadel */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-cyan-400">Citadel</span>
+                        <span className="font-bold text-cyan-400">{t('citadel')}</span>
                         <span className="text-slate-400">{playerStats.citadel.total} ({Math.round((playerStats.citadel.total / playerStats.total) * 100)}%)</span>
                       </div>
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
@@ -2987,7 +3047,7 @@ export default function Dashboard() {
                     {/* Other */}
                     <div>
                       <div className="flex justify-between text-[10px] mb-1">
-                        <span className="font-bold text-slate-400">Other</span>
+                        <span className="font-bold text-slate-400">{t('other')}</span>
                         <span className="text-slate-400">{playerStats.other.total} ({Math.round((playerStats.other.total / playerStats.total) * 100)}%)</span>
                       </div>
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden mb-1">
@@ -3011,14 +3071,14 @@ export default function Dashboard() {
 
               {/* Source Distribution */}
               <div className="mb-6">
-                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Sources Contributed</h3>
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">{t('sourcesContributed')}</h3>
                 {Object.keys(sourceCounts).length === 0 ? (
-                  <p className="text-xs text-slate-500">No source data available.</p>
+                  <p className="text-xs text-slate-500">{t('noSourceData')}</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(sourceCounts).map(([source, count]) => (
                       <span key={source} className="bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-lg text-xs text-slate-300">
-                        {source}: <strong className="text-gold">{count}</strong>
+                        {t('sourceItem', { source })}: <strong className="text-gold">{count}</strong>
                       </span>
                     ))}
                   </div>
@@ -3027,9 +3087,9 @@ export default function Dashboard() {
 
               {/* Recent Drops */}
               <div>
-                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">Recent Scan Activity (Last 10)</h3>
+                <h3 className="text-xs font-bold text-slate-350 uppercase mb-3">{t('recentScanActivity')}</h3>
                 {playerChests.length === 0 ? (
-                  <p className="text-xs text-slate-500">No recent activity.</p>
+                  <p className="text-xs text-slate-500">{t('noRecentActivity')}</p>
                 ) : (
                   <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
                     {playerChests.map(chest => (
@@ -3052,7 +3112,7 @@ export default function Dashboard() {
                   className="flex items-center gap-1.5 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/35 hover:border-red-500/50 text-red-400 font-bold rounded-xl text-xs transition-all cursor-pointer animate-pulse-slow"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Delete Contributions
+                  {t('deleteContributions')}
                 </button>
               </div>
             </div>
@@ -3080,23 +3140,23 @@ export default function Dashboard() {
                 <Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
               </div>
               <div>
-                <h2 className="text-md sm:text-lg font-bold text-slate-100">Delete Contributions</h2>
-                <p className="text-xs text-red-400 font-medium">Critical Action Required</p>
+                <h2 className="text-md sm:text-lg font-bold text-slate-100">{t('deleteContributionsTitle')}</h2>
+                <p className="text-xs text-red-400 font-medium">{t('criticalActionRequired')}</p>
               </div>
             </div>
 
             <div className="bg-red-950/20 border border-red-900/30 p-3 rounded-lg text-xs text-red-200/90 leading-relaxed mb-4">
-              <strong>Warning:</strong> This will permanently delete <strong>all</strong> chest scans and points contributed by <strong className="text-red-400">{showDeleteConfirm}</strong>. This action cannot be undone.
+              {t('deleteWarning', { player: showDeleteConfirm })}
             </div>
 
             <div className="space-y-3">
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Secret Admin Key
+                  {t('secretAdminKey')}
                 </label>
                 <input
                   type="password"
-                  placeholder="Enter delete secret key"
+                  placeholder={t('enterDeleteKey')}
                   value={deleteSecretKeyInput}
                   onChange={(e) => {
                     setDeleteSecretKeyInput(e.target.value);
@@ -3124,7 +3184,7 @@ export default function Dashboard() {
                   className="flex-1 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 font-bold rounded-xl text-xs transition-all cursor-pointer"
                   disabled={isDeleting}
                 >
-                  Cancel
+                  {t('cancelDelete')}
                 </button>
                 <button
                   onClick={() => handleConfirmDeleteContributions(showDeleteConfirm)}
@@ -3132,11 +3192,11 @@ export default function Dashboard() {
                   disabled={isDeleting || !deleteSecretKeyInput.trim()}
                 >
                   {isDeleting ? (
-                    <span>Deleting...</span>
+                    <span>{t('deleting')}</span>
                   ) : (
                     <>
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete All</span>
+                      <span>{t('confirmDelete')}</span>
                     </>
                   )}
                 </button>

@@ -24,10 +24,44 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { ocrName, correctedTo } = body;
-    if (!ocrName || !correctedTo) {
+    const { ocrName, ocrNames, correctedTo, secretKey } = body;
+
+    const expectedKey = process.env.DELETE_SECRET_KEY;
+    if (!expectedKey) {
       return NextResponse.json(
-        { error: "ocrName and correctedTo are required" },
+        { error: "Roster administration key is not configured on the server" },
+        { status: 500 }
+      );
+    }
+
+    if (secretKey !== expectedKey) {
+      return NextResponse.json({ error: "Invalid secret key" }, { status: 401 });
+    }
+
+    if (!correctedTo) {
+      return NextResponse.json(
+        { error: "correctedTo is required" },
+        { status: 400 }
+      );
+    }
+
+    if (ocrNames && Array.isArray(ocrNames)) {
+      // Bulk mapping
+      const records = await db.$transaction(
+        ocrNames.map((name) =>
+          db.playerFix.upsert({
+            where: { ocrName: name },
+            update: { correctedTo },
+            create: { ocrName: name, correctedTo },
+          })
+        )
+      );
+      return NextResponse.json({ success: true, count: records.length });
+    }
+
+    if (!ocrName) {
+      return NextResponse.json(
+        { error: "ocrName or ocrNames is required" },
         { status: 400 }
       );
     }

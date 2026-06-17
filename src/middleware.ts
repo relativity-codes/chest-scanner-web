@@ -11,6 +11,6 @@ export const config = {
     '/((?!api|_next|_vercel|.*\\..*).*)',
     // However, match all pathnames within `/users`, optionally with a locale prefix
     '/',
-    '/(en|es|fr|de|pt|ru|zh|ja|ko|tr|it|pl|ar|th|id)/:path*'
+    '/(en|es|fr|de|pt|ru|zh|ja|ko|tr|it|pl|ar|th|id|vi|zh-Hant|nl|uk|cs|ro)/:path*'
   ]
 };

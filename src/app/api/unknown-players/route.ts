@@ -48,9 +48,19 @@ export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const ocrName = searchParams.get("ocrName");
+    const ocrNames = searchParams.get("ocrNames");
+
+    if (ocrNames) {
+      const names = ocrNames.split(",").map((n) => decodeURIComponent(n).trim()).filter(Boolean);
+      await db.unknownPlayer.deleteMany({
+        where: { ocrName: { in: names } },
+      });
+      return NextResponse.json({ success: true });
+    }
+
     if (!ocrName) {
       return NextResponse.json(
-        { error: "Name parameter required" },
+        { error: "ocrName or ocrNames parameter required" },
         { status: 400 }
       );
     }

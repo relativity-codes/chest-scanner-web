@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { RefreshCw, Info } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 interface DailyStat {
   date: string;
@@ -13,20 +14,31 @@ interface PlayerMiniTrendProps {
   player: string;
 }
 
-function formatLabelDate(dateStr: string): string {
+function formatLabelDate(dateStr: string, locale: string): string {
   const parts = dateStr.split("-");
   if (parts.length < 3) return dateStr;
   const y = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10) - 1;
   const d = parseInt(parts[2], 10);
   const dateObj = new Date(Date.UTC(y, m, d));
-  const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const dayOfWeek = weekdayNames[dateObj.getUTCDay()];
-  return `${dayOfWeek}, ${monthNames[m]} ${d}`;
+  try {
+    return dateObj.toLocaleDateString(locale, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC"
+    });
+  } catch (err) {
+    const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const dayOfWeek = weekdayNames[dateObj.getUTCDay()];
+    return `${dayOfWeek}, ${monthNames[m]} ${d}`;
+  }
 }
 
 export default function PlayerMiniTrend({ player }: PlayerMiniTrendProps) {
+  const locale = useLocale();
+  const t = useTranslations("Trends");
   const [stats, setStats] = useState<DailyStat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -124,7 +136,7 @@ export default function PlayerMiniTrend({ player }: PlayerMiniTrendProps) {
     return (
       <div className="bg-slate-950/20 border border-slate-900 rounded-xl p-6 flex flex-col items-center justify-center min-h-[110px]">
         <RefreshCw className="w-5 h-5 text-amber-500 animate-spin mb-1.5" />
-        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Loading trend data...</span>
+        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{t('loadingTrendData')}</span>
       </div>
     );
   }
@@ -133,28 +145,28 @@ export default function PlayerMiniTrend({ player }: PlayerMiniTrendProps) {
     return (
       <div className="bg-slate-950/20 border border-slate-900 rounded-xl p-4 flex flex-col items-center justify-center min-h-[110px] text-center text-xs text-slate-500">
         <Info className="w-4 h-4 text-slate-600 mb-1" />
-        <span>No trend history found for this player.</span>
+        <span>{t('noTrendHistory')}</span>
       </div>
     );
   }
 
-  const firstDateLabel = formatLabelDate(chartData[0].date);
-  const lastDateLabel = formatLabelDate(chartData[chartData.length - 1].date);
+  const firstDateLabel = formatLabelDate(chartData[0].date, locale);
+  const lastDateLabel = formatLabelDate(chartData[chartData.length - 1].date, locale);
 
   return (
     <div className="bg-slate-950/40 border border-slate-900 rounded-xl p-3 flex flex-col relative overflow-hidden">
       <div className="flex justify-between items-center mb-1">
         <span className="text-[8px] font-bold text-slate-400 tracking-wide uppercase">
-          Activity Trend ({chartData.length} days range)
+          {t('activityTrend', { count: chartData.length })}
         </span>
         <div className="flex items-center gap-2.5 text-[8.5px]">
           <span className="flex items-center gap-1 text-amber-500 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            Drops (Peak: {maxDrops})
+            {t('dropsPeak', { peak: maxDrops })}
           </span>
           <span className="flex items-center gap-1 text-purple-400 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-            Wealth (Peak: {maxWealth})
+            {t('wealthPeak', { peak: maxWealth })}
           </span>
         </div>
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import {
   BarChart3,
   Download,
@@ -89,6 +90,7 @@ interface TrendsTabProps {
 }
 
 export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
+  const t = useTranslations('Trends');
   const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -331,7 +333,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
     return (
       <div className="glass-panel rounded-xl sm:rounded-2xl p-8 flex flex-col items-center justify-center min-h-[350px]">
         <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mb-3" />
-        <span className="text-xs text-slate-400 font-semibold tracking-wide">AGGREGATING HISTORICAL METRICS...</span>
+        <span className="text-xs text-slate-400 font-semibold tracking-wide">{t('aggregating')}</span>
       </div>
     );
   }
@@ -340,16 +342,16 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
     return (
       <div className="glass-panel rounded-xl sm:rounded-2xl p-8 flex flex-col items-center justify-center min-h-[350px] text-center">
         <Info className="w-8 h-8 text-rose-400 mb-3" />
-        <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Failed to load trends data</h3>
+        <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">{t('failedToLoad')}</h3>
         <p className="text-xs text-slate-450 mt-1 max-w-sm">
-          {dailyStats.length === 0 ? "No scan history records found in the database." : "Could not retrieve stats due to a server connection failure."}
+          {dailyStats.length === 0 ? t('noScanHistory') : t('serverError')}
         </p>
         <button
           onClick={fetchStats}
           className="mt-4 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-850 hover:border-slate-700 text-xs font-bold rounded-xl text-amber-500 transition-all flex items-center gap-1.5"
         >
           <RefreshCw className="w-3.5 h-3.5" />
-          <span>RETRY LOAD</span>
+          <span>{t('retryLoad')}</span>
         </button>
       </div>
     );
@@ -363,60 +365,60 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
         {/* Total Scanned */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 tracking-wider uppercase">
-            {graphType === "daily" ? "PERIOD TOTAL DROPS" : "ALL-TIME TOTAL DROPS"}
+            {graphType === "daily" ? t('periodTotalDrops') : t('allTimeTotalDrops')}
           </span>
           <div className="flex items-baseline gap-1.5 mt-2">
             <span className="text-lg sm:text-2xl font-black text-amber-500 font-mono">
               {statsSummary.totalDrops.toLocaleString()}
             </span>
-            <span className="text-[9px] sm:text-[10px] text-slate-400">drops</span>
+            <span className="text-[9px] sm:text-[10px] text-slate-400">{t('dropsUnit')}</span>
           </div>
-          <p className="text-[9px] text-slate-500 mt-1">Sum of scans in selected range</p>
+          <p className="text-[9px] text-slate-500 mt-1">{t('sumOfScans')}</p>
         </div>
 
         {/* Total Wealth */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 tracking-wider uppercase">
-            {graphType === "daily" ? "PERIOD TOTAL WEALTH" : "ALL-TIME TOTAL WEALTH"}
+            {graphType === "daily" ? t('periodTotalWealth') : t('allTimeTotalWealth')}
           </span>
           <div className="flex items-baseline gap-1.5 mt-2">
             <span className="text-lg sm:text-2xl font-black text-purple-400 font-mono">
               {statsSummary.totalWealth.toLocaleString()}
             </span>
-            <span className="text-[9px] sm:text-[10px] text-slate-400">points</span>
+            <span className="text-[9px] sm:text-[10px] text-slate-400">{t('pointsUnit')}</span>
           </div>
-          <p className="text-[9px] text-slate-500 mt-1">Wealth aggregated in range 💎</p>
+          <p className="text-[9px] text-slate-500 mt-1">{t('wealthInRange')}</p>
         </div>
 
         {/* Peak Daily Drops */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between">
-          <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 tracking-wider uppercase">PEAK DAILY DROPS</span>
+          <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 tracking-wider uppercase">{t('peakDailyDrops')}</span>
           <div className="flex items-baseline gap-1.5 mt-2">
             <span className="text-lg sm:text-2xl font-black text-amber-500 font-mono">
               {statsSummary.peakDrops}
             </span>
-            <span className="text-[9px] sm:text-[10px] text-slate-400">scans</span>
+            <span className="text-[9px] sm:text-[10px] text-slate-400">{t('scansUnit')}</span>
           </div>
           <p className="text-[9px] text-slate-500 mt-1">
-            Achieved on <span className="text-slate-350">{statsSummary.peakDropsDate !== "N/A" ? formatLabelDate(statsSummary.peakDropsDate) : "N/A"}</span>
+            {t('achievedOn')} <span className="text-slate-350">{statsSummary.peakDropsDate !== "N/A" ? formatLabelDate(statsSummary.peakDropsDate) : "N/A"}</span>
           </p>
         </div>
 
         {/* Daily/Weekly Average Drops */}
         <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col justify-between">
           <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 tracking-wider uppercase">
-            {groupBy === "day" ? "DAILY AVERAGE SCANS" : "WEEKLY AVERAGE SCANS"}
+            {groupBy === "day" ? t('dailyAvgScans') : t('weeklyAvgScans')}
           </span>
           <div className="flex items-baseline gap-1.5 mt-2">
             <span className="text-lg sm:text-2xl font-black text-slate-200 font-mono">
               {statsSummary.avgDrops.toFixed(1)}
             </span>
             <span className="text-[9px] sm:text-[10px] text-slate-400">
-              {groupBy === "day" ? "chests/day" : "chests/week"}
+              {groupBy === "day" ? t('chestsPerDay') : t('chestsPerWeek')}
             </span>
           </div>
           <p className="text-[9px] text-slate-500 mt-1">
-            {groupBy === "day" ? "Avg Wealth/day: " : "Avg Wealth/week: "}
+            {groupBy === "day" ? t('avgWealthDay') : t('avgWealthWeek')}
             <span className="text-purple-400 font-semibold">{Math.round(statsSummary.avgWealth).toLocaleString()}</span>
           </p>
         </div>
@@ -430,10 +432,10 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
           <div>
             <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-amber-500" />
-              <span>Scanning Performance Charts</span>
+              <span>{t('chartTitle')}</span>
             </h2>
             <p className="text-xs text-slate-450 mt-0.5">
-              Dual-axes tracking showing Daily Drops (Gold) vs. Daily Wealth (Purple)
+              {t('chartSubtitle')}
             </p>
           </div>
 
@@ -441,13 +443,13 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
             {/* Player Selector Dropdown */}
             {players.length > 0 && (
               <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-900 text-[10px] font-bold h-[34px] min-w-[120px]">
-                <span className="text-slate-500 uppercase tracking-wider text-[8px]">Player:</span>
+                <span className="text-slate-500 uppercase tracking-wider text-[8px]">{t('playerLabel')}</span>
                 <select
                   value={selectedPlayer}
                   onChange={(e) => setSelectedPlayer(e.target.value)}
                   className="bg-transparent text-slate-200 border-none outline-none focus:ring-0 cursor-pointer text-[10px] font-bold py-0.5 pl-0.5 pr-2 focus:text-amber-400 select-custom"
                 >
-                  <option value="" className="bg-[#05060b] text-slate-400 font-bold">ALL MEMBERS</option>
+                  <option value="all" className="bg-[#05060b] text-slate-400 font-bold">{t('allMembers')}</option>
                   {players.map((p) => (
                     <option key={p} value={p} className="bg-[#05060b] text-slate-200 font-bold">
                       {p}
@@ -467,7 +469,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                DAILY
+                {t('daily')}
               </button>
               <button
                 onClick={() => setGroupBy("week")}
@@ -477,7 +479,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                WEEKLY
+                {t('weekly')}
               </button>
             </div>
 
@@ -491,7 +493,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                {groupBy === "day" ? "DAILY STATS" : "WEEKLY STATS"}
+                {groupBy === "day" ? t('dailyStats') : t('weeklyStats')}
               </button>
               <button
                 onClick={() => setGraphType("cumulative")}
@@ -501,7 +503,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                CUMULATIVE PROGRESS
+                {t('cumulativeProgress')}
               </button>
             </div>
 
@@ -509,33 +511,33 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
             <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-900 text-[10px] font-bold">
               {groupBy === "day" ? (
                 <>
-                  {(["all", "30d", "14d", "7d"] as const).map((t) => (
+                  {(["all", "30d", "14d", "7d"] as const).map((tf) => (
                     <button
-                      key={t}
-                      onClick={() => setTimeframe(t)}
+                      key={tf}
+                      onClick={() => setTimeframe(tf)}
                       className={`px-2.5 py-1.5 rounded-lg transition-all uppercase ${
-                        timeframe === t
+                        timeframe === tf
                           ? "bg-slate-800 text-slate-100"
                           : "text-slate-500 hover:text-slate-300"
                       }`}
                     >
-                      {t === "all" ? "All Time" : t}
+                      {tf === "all" ? t('allTime') : tf}
                     </button>
                   ))}
                 </>
               ) : (
                 <>
-                  {(["all", "12w", "6w", "4w"] as const).map((t) => (
+                  {(["all", "12w", "6w", "4w"] as const).map((tf) => (
                     <button
-                      key={t}
-                      onClick={() => setTimeframe(t)}
+                      key={tf}
+                      onClick={() => setTimeframe(tf)}
                       className={`px-2.5 py-1.5 rounded-lg transition-all uppercase ${
-                        timeframe === t
+                        timeframe === tf
                           ? "bg-slate-800 text-slate-100"
                           : "text-slate-500 hover:text-slate-300"
                       }`}
                     >
-                      {t === "all" ? "All Time" : t}
+                      {tf === "all" ? t('allTime') : tf}
                     </button>
                   ))}
                 </>
@@ -750,19 +752,19 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                   }}
                 >
                   <p className="font-bold text-slate-100 pb-1.5 border-b border-slate-800/80 mb-2">
-                    {groupBy === "day" ? formatLabelDate(d.date) : `Week of ${formatLabelDate(d.date)}`}
+                    {groupBy === "day" ? formatLabelDate(d.date) : `${t('weekOf')} ${formatLabelDate(d.date)}`}
                   </p>
                   
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] text-slate-400">
-                        {groupBy === "day" ? "Daily Drops:" : "Weekly Drops:"}
+                        {groupBy === "day" ? t('dailyDropsTooltip') : t('weeklyDropsTooltip')}
                       </span>
                       <span className="font-mono font-bold text-amber-400">{d.drops}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] text-slate-400">
-                        {groupBy === "day" ? "Daily Wealth:" : "Weekly Wealth:"}
+                        {groupBy === "day" ? t('dailyWealthTooltip') : t('weeklyWealthTooltip')}
                       </span>
                       <span className="font-mono font-bold text-purple-400">{d.wealth.toLocaleString()}</span>
                     </div>
@@ -770,11 +772,11 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                     {graphType === "cumulative" && (
                       <div className="pt-1.5 border-t border-slate-800/50 flex flex-col gap-1 mt-1 text-[9.5px]">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Total Drops:</span>
+                          <span className="text-slate-500">{t('totalDropsTooltip')}</span>
                           <span className="font-mono font-bold text-amber-500/80">{d.cumDrops}</span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Total Wealth:</span>
+                          <span className="text-slate-500">{t('totalWealthTooltip')}</span>
                           <span className="font-mono font-bold text-purple-500/80">{d.cumWealth.toLocaleString()}</span>
                         </div>
                       </div>
@@ -791,13 +793,13 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
           <div className="flex items-center gap-2">
             <div className="w-3.5 h-1.5 bg-amber-500 rounded-full" />
             <span className="text-slate-300">
-              {groupBy === "day" ? "Daily Scanned Drops" : "Weekly Scanned Drops"} (Gold Line, Left Axis)
+              {groupBy === "day" ? t('legendDailyDrops') : t('legendWeeklyDrops')}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3.5 h-1.5 bg-purple-500 rounded-full" />
             <span className="text-slate-300">
-              {groupBy === "day" ? "Daily Wealth Points" : "Weekly Wealth Points"} (Purple Line, Right Axis)
+              {groupBy === "day" ? t('legendDailyWealth') : t('legendWeeklyWealth')}
             </span>
           </div>
         </div>
@@ -808,10 +810,12 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wide">
-              Historical {groupBy === "day" ? "Day-By-Day" : "Week-By-Week"} Aggregation Log ({processedStats.length} {groupBy === "day" ? "days" : "weeks"})
+              {groupBy === "day"
+                ? t('logTitleDay', { count: processedStats.length })
+                : t('logTitleWeek', { count: processedStats.length })}
             </h3>
             <p className="text-[10px] text-slate-500">
-              Complete historical spreadsheet view. Sorted by {groupBy === "day" ? "date" : "week starting date"} descending.
+              {groupBy === "day" ? t('logSubtitleDate') : t('logSubtitleWeek')}
             </p>
           </div>
 
@@ -820,7 +824,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-medium bg-slate-950 border-slate-800 hover:bg-slate-900 text-slate-300 hover:text-slate-100 transition-all text-xs"
           >
             <Download className="w-3.5 h-3.5 text-amber-500" />
-            <span>EXPORT RANGE CSV</span>
+            <span>{t('exportRangeCsv')}</span>
           </button>
         </div>
 
@@ -832,16 +836,16 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
                 <thead className="bg-slate-950 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
                   <tr>
                     <th className="px-4 py-3 text-left">
-                      {groupBy === "day" ? "Date" : "Week Starting (Monday)"}
+                      {groupBy === "day" ? t('dateCol') : t('weekStartCol')}
                     </th>
                     <th className="px-4 py-3 text-right">
-                      {groupBy === "day" ? "Daily Drops" : "Weekly Drops"}
+                      {groupBy === "day" ? t('dailyDropsCol') : t('weeklyDropsCol')}
                     </th>
                     <th className="px-4 py-3 text-right">
-                      {groupBy === "day" ? "Daily Wealth Points" : "Weekly Wealth Points"}
+                      {groupBy === "day" ? t('dailyWealthCol') : t('weeklyWealthCol')}
                     </th>
-                    <th className="px-4 py-3 text-right">Cumulative Drops</th>
-                    <th className="px-4 py-3 text-right">Cumulative Wealth Points</th>
+                    <th className="px-4 py-3 text-right">{t('cumDropsCol')}</th>
+                    <th className="px-4 py-3 text-right">{t('cumWealthCol')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900 bg-slate-950/20">

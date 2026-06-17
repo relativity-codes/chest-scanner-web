@@ -94,10 +94,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, secretKey } = body;
-    if (!name || typeof name !== "string") {
-      return NextResponse.json({ error: "Invalid name" }, { status: 400 });
-    }
+    const { name, names, secretKey } = body;
 
     const expectedKey = process.env.DELETE_SECRET_KEY;
     if (!expectedKey) {
@@ -109,6 +106,19 @@ export async function POST(req: NextRequest) {
 
     if (secretKey !== expectedKey) {
       return NextResponse.json({ error: "Invalid secret key" }, { status: 401 });
+    }
+
+    if (names && Array.isArray(names)) {
+      // Bulk addition
+      await db.player.createMany({
+        data: names.map((n) => ({ name: n.trim() })),
+        skipDuplicates: true,
+      });
+      return NextResponse.json({ success: true, count: names.length });
+    }
+
+    if (!name || typeof name !== "string") {
+      return NextResponse.json({ error: "Invalid name" }, { status: 400 });
     }
 
     const player = await db.player.upsert({
@@ -149,6 +159,13 @@ export async function DELETE(req: NextRequest) {
 
     await db.player.deleteMany({
       where: { name },
+    });
+
+    // Reversal: Re-add to unknown players log
+    await db.unknownPlayer.upsert({
+      where: { ocrName: name },
+      update: {},
+      create: { ocrName: name },
     });
 
     return NextResponse.json({ success: true });

@@ -124,19 +124,56 @@ export async function DELETE(req: NextRequest) {
 
     const canonicalPlayer = await canonicalizePlayerName(player);
 
-    const deleteResult = await db.chest.deleteMany({
+    // Find all OCR name variants associated with this player
+    const corrections = await db.playerFix.findMany({
       where: {
-        fromPlayer: canonicalPlayer,
+        OR: [
+          { correctedTo: canonicalPlayer },
+          { correctedTo: player }
+        ]
       },
+      select: { ocrName: true }
     });
+    const namesToClean = Array.from(new Set([
+      canonicalPlayer,
+      player,
+      ...corrections.map((c) => c.ocrName)
+    ]));
+
+    // Transaction to safely delete chests, whitelist, unknown logs, and corrections
+    const [deleteChestsResult] = await db.$transaction([
+      db.chest.deleteMany({
+        where: {
+          fromPlayer: { in: namesToClean },
+        },
+      }),
+      db.player.deleteMany({
+        where: {
+          name: { in: namesToClean },
+        },
+      }),
+      db.unknownPlayer.deleteMany({
+        where: {
+          ocrName: { in: namesToClean },
+        },
+      }),
+      db.playerFix.deleteMany({
+        where: {
+          OR: [
+            { ocrName: { in: namesToClean } },
+            { correctedTo: { in: namesToClean } }
+          ]
+        },
+      }),
+    ]);
 
     await sendDiscordAlert(
-      `🗑️ **Contributions Deleted**: All ${deleteResult.count} chest scans for player **${canonicalPlayer}** have been deleted by an admin.`
+      `🗑️ **Contributions & Identity Deleted**: All ${deleteChestsResult.count} chest scans and all whitelist/moderation records for player **${canonicalPlayer}** (and associated aliases) have been permanently deleted by an admin.`
     );
 
     return NextResponse.json({
       success: true,
-      count: deleteResult.count,
+      count: deleteChestsResult.count,
     });
   } catch (error: any) {
     console.error("Failed to delete player contributions:", error);
