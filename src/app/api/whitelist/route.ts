@@ -94,9 +94,21 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name } = body;
+    const { name, secretKey } = body;
     if (!name || typeof name !== "string") {
       return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+    }
+
+    const expectedKey = process.env.DELETE_SECRET_KEY;
+    if (!expectedKey) {
+      return NextResponse.json(
+        { error: "Roster administration key is not configured on the server" },
+        { status: 500 }
+      );
+    }
+
+    if (secretKey !== expectedKey) {
+      return NextResponse.json({ error: "Invalid secret key" }, { status: 401 });
     }
 
     const player = await db.player.upsert({
@@ -118,8 +130,21 @@ export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const name = searchParams.get("name");
+    const secretKey = searchParams.get("secretKey");
     if (!name) {
       return NextResponse.json({ error: "Name required" }, { status: 400 });
+    }
+
+    const expectedKey = process.env.DELETE_SECRET_KEY;
+    if (!expectedKey) {
+      return NextResponse.json(
+        { error: "Roster administration key is not configured on the server" },
+        { status: 500 }
+      );
+    }
+
+    if (secretKey !== expectedKey) {
+      return NextResponse.json({ error: "Invalid secret key" }, { status: 401 });
     }
 
     await db.player.deleteMany({

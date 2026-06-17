@@ -34,7 +34,9 @@ import {
   ArrowUp,
   ArrowDown,
   Trophy,
-  ScanText
+  ScanText,
+  ChevronDown,
+  Lock
 } from "lucide-react";
 
 interface Chest {
@@ -377,6 +379,36 @@ export default function Dashboard() {
   // Correction inputs
   const [ocrErrorInput, setOcrErrorInput] = useState("");
   const [ocrCorrectToInput, setOcrCorrectToInput] = useState("");
+
+  // Bulk selection states
+  const [selectedUnknowns, setSelectedUnknowns] = useState<string[]>([]);
+  const [bulkCorrectionTarget, setBulkCorrectionTarget] = useState("");
+  const [unknownsDropdownOpen, setUnknownsDropdownOpen] = useState(false);
+  const [unknownsSearchQuery, setUnknownsSearchQuery] = useState("");
+
+  const sortedWhitelistNames = useMemo(() => {
+    return [...players].sort((a, b) => a.localeCompare(b));
+  }, [players]);
+
+  const filteredUnknowns = useMemo(() => {
+    const query = unknownsSearchQuery.toLowerCase();
+    const sorted = [...unknownPlayers].sort((a, b) => a.ocrName.localeCompare(b.ocrName));
+    return sorted.filter((u) => u.ocrName.toLowerCase().includes(query));
+  }, [unknownPlayers, unknownsSearchQuery]);
+
+  const unknownsDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (unknownsDropdownRef.current && !unknownsDropdownRef.current.contains(event.target as Node)) {
+        setUnknownsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   // Dynamically map rawChests based on spelling fixes
   const mappedRawChests = useMemo(() => {
@@ -833,7 +865,7 @@ export default function Dashboard() {
       const res = await fetch("/api/whitelist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({ name: trimmed, secretKey: deleteSecretKeyInput }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -843,6 +875,9 @@ export default function Dashboard() {
           if (prev[trimmed]) return prev;
           return { ...prev, [trimmed]: data.createdAt || new Date().toISOString() };
         });
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to whitelist player. Please verify the admin secret key.");
       }
     } catch (e) {
       console.error(e);
@@ -851,11 +886,14 @@ export default function Dashboard() {
 
   const handleDeletePlayer = async (name: string) => {
     try {
-      const res = await fetch(`/api/whitelist?name=${encodeURIComponent(name)}`, {
+      const res = await fetch(`/api/whitelist?name=${encodeURIComponent(name)}&secretKey=${encodeURIComponent(deleteSecretKeyInput)}`, {
         method: "DELETE",
       });
       if (res.ok) {
         setPlayers((prev) => prev.filter((p) => p !== name));
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to remove player from whitelist. Please verify the admin secret key.");
       }
     } catch (e) {
       console.error(e);
@@ -869,7 +907,7 @@ export default function Dashboard() {
       const addRes = await fetch("/api/whitelist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: ocrName }),
+        body: JSON.stringify({ name: ocrName, secretKey: deleteSecretKeyInput }),
       });
 
       if (addRes.ok) {
@@ -886,6 +924,10 @@ export default function Dashboard() {
         });
 
         setUnknownPlayers((prev) => prev.filter((u) => u.ocrName !== ocrName));
+        setSelectedUnknowns((prev) => prev.filter((name) => name !== ocrName));
+      } else {
+        const data = await addRes.json();
+        alert(data.error || "Failed to approve player. Please verify the admin secret key.");
       }
     } catch (e) {
       console.error("Moderation whitelisting failed:", e);
@@ -914,9 +956,97 @@ export default function Dashboard() {
         });
 
         setUnknownPlayers((prev) => prev.filter((u) => u.ocrName !== ocrName));
+        setSelectedUnknowns((prev) => prev.filter((name) => name !== ocrName));
       }
     } catch (e) {
       console.error("Spelling mapping failed:", e);
+    }
+  };
+
+  // Bulk Approve selected unknown players
+  const handleBulkApprove = async () => {
+    if (selectedUnknowns.length === 0) return;
+    try {
+      const approvedNames: string[] = [];
+      const newFirstAppearances: Record<string, string> = {};
+      let failed = false;
+      let errMsg = "";
+      
+      await Promise.all(selectedUnknowns.map(async (ocrName) => {
+        const addRes = await fetch("/api/whitelist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: ocrName, secretKey: deleteSecretKeyInput }),
+        });
+
+        if (addRes.ok) {
+          const data = await addRes.json();
+          approvedNames.push(ocrName);
+          newFirstAppearances[ocrName] = data.createdAt || new Date().toISOString();
+          
+          await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(ocrName)}`, {
+            method: "DELETE",
+          });
+        } else {
+          failed = true;
+          const data = await addRes.json();
+          errMsg = data.error || "Approval failed.";
+        }
+      }));
+
+      if (approvedNames.length > 0) {
+        setPlayers((prev) => [...prev, ...approvedNames].sort());
+        setFirstAppearances((prev) => ({
+          ...prev,
+          ...newFirstAppearances,
+        }));
+        setUnknownPlayers((prev) => prev.filter((u) => !approvedNames.includes(u.ocrName)));
+      }
+      setSelectedUnknowns([]);
+
+      if (failed) {
+        alert(errMsg || "Some approvals failed. Please verify the admin secret key.");
+      }
+    } catch (e) {
+      console.error("Bulk moderation whitelisting failed:", e);
+    }
+  };
+
+  // Bulk Assign Spelling Correction
+  const handleBulkAssign = async () => {
+    if (selectedUnknowns.length === 0 || !bulkCorrectionTarget) return;
+    try {
+      const target = bulkCorrectionTarget.trim();
+      const newFixes: PlayerFix[] = [];
+      
+      await Promise.all(selectedUnknowns.map(async (name) => {
+        const fixRes = await fetch("/api/player-fixes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ocrName: name, correctedTo: target }),
+        });
+        if (fixRes.ok) {
+          const newFix = await fixRes.json();
+          newFixes.push(newFix);
+          await fetch(`/api/unknown-players?ocrName=${encodeURIComponent(name)}`, {
+            method: "DELETE",
+          });
+        }
+      }));
+
+      setFixes((prev) => {
+        let current = [...prev];
+        newFixes.forEach((newFix) => {
+          current = [...current.filter((f) => f.ocrName !== newFix.ocrName), newFix];
+        });
+        return current;
+      });
+
+      setUnknownPlayers((prev) => prev.filter((u) => !selectedUnknowns.includes(u.ocrName)));
+      setSelectedUnknowns([]);
+      setBulkCorrectionTarget("");
+    } catch (e) {
+      console.error("Bulk spelling mapping failed:", e);
     }
   };
 
@@ -2294,138 +2424,256 @@ export default function Dashboard() {
 
       {/* 2. TAB: CLAN WHITELIST */}
       {activeTab === "whitelist" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
-          {/* Main Roster Panel */}
-          <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
-              <div>
-                <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">CLAN MEMBER ROSTER ({players.length})</h2>
-                <p className="text-xs text-slate-400">Only players in this list will be processed without alerts.</p>
+        <div className="space-y-4">
+          {/* Admin Passcode Banner */}
+          <div className="glass-panel p-4 border-amber-500/20 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-amber-500/[0.02]">
+            <div className="flex items-center gap-3">
+              <div className="bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                <Lock className="w-5 h-5 text-amber-500" />
               </div>
-
-              {/* Add and Search inputs */}
-              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <div className="relative w-full sm:w-auto">
-                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Search roster..."
-                    value={playerSearchQuery}
-                    onChange={(e) => setPlayerSearchQuery(e.target.value)}
-                    className="pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-44"
-                  />
-                </div>
-
-                <div className="flex gap-1.5 w-full sm:w-auto">
-                  <input
-                    type="text"
-                    placeholder="Add player tag..."
-                    value={newPlayerName}
-                    onChange={(e) => setNewPlayerName(e.target.value)}
-                    className="flex-1 sm:flex-none px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-36"
-                  />
-                  <button
-                    onClick={() => handleAddPlayer(newPlayerName)}
-                    className="p-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all flex-shrink-0"
-                  >
-                    <Plus className="w-4 h-4 stroke-[3]" />
-                  </button>
-                </div>
+              <div>
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wide">Roster Administration Passcode</h3>
+                <p className="text-[10px] text-slate-400">Required to add, approve, map, or delete clan members on the whitelist.</p>
               </div>
             </div>
-
-            {/* List block */}
-            <div className="flex-1 overflow-y-auto pr-1">
-              {filteredPlayers.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-slate-500 text-xs">
-                  No clan members matched &quot;{playerSearchQuery}&quot; or roster is empty.
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                  {filteredPlayers.map((player) => (
-                    <div
-                      key={player}
-                      className="flex items-center justify-between p-3 bg-slate-950/65 border border-slate-900 rounded-xl hover:border-slate-800 hover:bg-slate-950/90 transition-all group"
-                    >
-                      <span className="font-semibold text-slate-200 truncate">{player}</span>
-                      <button
-                        onClick={() => handleDeletePlayer(player)}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all"
-                        title="Remove from roster"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                placeholder="Enter admin passcode"
+                value={deleteSecretKeyInput}
+                onChange={(e) => setDeleteSecretKeyInput(e.target.value)}
+                className="px-3 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-650 focus:outline-none focus:border-amber-500/50 w-full sm:w-48"
+              />
             </div>
           </div>
 
-          {/* Right Moderation Queue Panel */}
-          <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[400px] sm:h-[550px] overflow-hidden border-rose-500/15">
-            <div className="flex items-center gap-2 mb-2">
-              <ShieldAlert className="w-5 h-5 text-rose-400" />
-              <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">MODERATION QUEUE</h2>
-            </div>
-            <p className="text-[11px] text-slate-400 mb-4 leading-normal">
-              Encounters reported by the Android OCR scanner that do not match the roster. Review and approve or correct.
-            </p>
-
-            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3.5">
-              {unknownPlayers.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 text-center">
-                  <Check className="w-10 h-10 stroke-[2] text-emerald-500/80 bg-emerald-500/5 p-2 rounded-full border border-emerald-500/10" />
-                  <p className="text-xs font-semibold text-slate-350">Queue is completely clear!</p>
-                  <p className="text-[10px] text-slate-600 max-w-[200px]">OCR reads are currently mapping cleanly to the whitelisted roster.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
+            {/* Main Roster Panel */}
+            <div className="lg:col-span-2 glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="text-base font-bold text-slate-200 uppercase tracking-wide">CLAN MEMBER ROSTER ({players.length})</h2>
+                  <p className="text-xs text-slate-400">Only players in this list will be processed without alerts.</p>
                 </div>
-              ) : (
-                unknownPlayers.map((unPlayer) => (
-                  <div key={unPlayer.id} className="p-3.5 bg-rose-500/[0.02] border border-rose-500/10 rounded-xl flex flex-col gap-3">
-                    <div className="flex justify-between items-start">
-                      <div className="flex flex-col">
-                        <span className="text-xs font-bold text-rose-350 tracking-tight font-mono truncate max-w-[150px]" title={unPlayer.ocrName}>
-                          {unPlayer.ocrName}
-                        </span>
-                        <span className="text-[9px] text-slate-500 mt-0.5">
-                          Encountered: {new Date(unPlayer.encountered).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
 
-                      <button
-                        onClick={() => handleApproveUnknownPlayer(unPlayer.ocrName)}
-                        className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-bold transition-all"
-                        title="Add this player directly to clan whitelist"
+                {/* Add and Search inputs */}
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-auto">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search roster..."
+                      value={playerSearchQuery}
+                      onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                      className="pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-44"
+                    />
+                  </div>
+
+                  <div className="flex gap-1.5 w-full sm:w-auto">
+                    <input
+                      type="text"
+                      placeholder="Add player tag..."
+                      value={newPlayerName}
+                      onChange={(e) => setNewPlayerName(e.target.value)}
+                      className="flex-1 sm:flex-none px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-amber-500/50 w-full sm:w-36"
+                    />
+                    <button
+                      onClick={() => handleAddPlayer(newPlayerName)}
+                      className="p-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all flex-shrink-0"
+                    >
+                      <Plus className="w-4 h-4 stroke-[3]" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* List block */}
+              <div className="flex-1 overflow-y-auto pr-1">
+                {filteredPlayers.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-slate-500 text-xs">
+                    No clan members matched &quot;{playerSearchQuery}&quot; or roster is empty.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                    {filteredPlayers.map((player) => (
+                      <div
+                        key={player}
+                        className="flex items-center justify-between p-3 bg-slate-950/65 border border-slate-900 rounded-xl hover:border-slate-800 hover:bg-slate-950/90 transition-all group"
                       >
-                        <Users className="w-3 h-3" />
-                        <span>APPROVE</span>
-                      </button>
-                    </div>
-
-                    {/* Quick spelling correction mapper */}
-                    <div className="pt-2 border-t border-slate-900 flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-slate-400">ASSIGN SPELLING CORRECTION:</span>
-                      <div className="flex gap-1">
-                        <input
-                          type="text"
-                          placeholder="Correct name tag..."
-                          id={`correct-${unPlayer.id}`}
-                          className="flex-1 px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg text-[10px] text-slate-100 focus:outline-none w-28"
-                        />
+                        <span className="font-semibold text-slate-200 truncate">{player}</span>
                         <button
-                          onClick={() => {
-                            const inputEl = document.getElementById(`correct-${unPlayer.id}`) as HTMLInputElement;
-                            if (inputEl) handleAssignCorrection(unPlayer.ocrName, inputEl.value);
-                          }}
-                          className="px-2 py-1 bg-slate-900 border border-slate-750 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/30 text-slate-400 rounded-lg text-[10px] font-bold transition-all"
+                          onClick={() => handleDeletePlayer(player)}
+                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-all"
+                          title="Remove from roster"
                         >
-                          MAP
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Moderation Queue Panel */}
+            <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col h-[450px] sm:h-[550px] overflow-hidden border-rose-500/15">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldAlert className="w-5 h-5 text-rose-400" />
+                <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide">MODERATION QUEUE</h2>
+              </div>
+              <p className="text-[11px] text-slate-400 mb-4 leading-normal">
+                OCR-scanned names not on the whitelist. Select multiple names to map them to an existing player or approve them directly.
+              </p>
+
+              <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-1">
+                {/* Step 1: Select Misspelled Names from Dropdown */}
+                <div className="flex flex-col gap-1.5 relative shrink-0" ref={unknownsDropdownRef}>
+                  <label className="text-[10px] font-black text-rose-400 uppercase tracking-wider">
+                    1. Select Misspelled Names ({unknownPlayers.length} in queue):
+                  </label>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setUnknownsDropdownOpen(!unknownsDropdownOpen)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-left text-slate-200 placeholder-slate-550 focus:outline-none focus:border-rose-500/50 flex items-center justify-between"
+                  >
+                    <span className="truncate">
+                      {selectedUnknowns.length === 0
+                        ? "Choose misspelled names..."
+                        : `${selectedUnknowns.length} name(s) selected`}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-slate-500" />
+                  </button>
+
+                  {unknownsDropdownOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-xl z-50 flex flex-col max-h-60 overflow-hidden">
+                      <div className="p-2 border-b border-slate-900 shrink-0">
+                        <input
+                          type="text"
+                          placeholder="Search queue..."
+                          value={unknownsSearchQuery}
+                          onChange={(e) => setUnknownsSearchQuery(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-550 focus:outline-none focus:border-rose-500/50"
+                        />
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+                        {filteredUnknowns.length === 0 ? (
+                          <div className="p-2 text-center text-xs text-slate-500">
+                            No matching names in queue.
+                          </div>
+                        ) : (
+                          filteredUnknowns.map((u) => {
+                            const isSelected = selectedUnknowns.includes(u.ocrName);
+                            return (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedUnknowns(selectedUnknowns.filter((name) => name !== u.ocrName));
+                                  } else {
+                                    setSelectedUnknowns([...selectedUnknowns, u.ocrName]);
+                                  }
+                                }}
+                                className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-900 rounded-lg text-xs text-left text-slate-305 transition-all hover:text-white"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  readOnly
+                                  className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-rose-500 focus:ring-rose-500 focus:ring-offset-slate-950 cursor-pointer"
+                                />
+                                <span className="truncate font-mono">{u.ocrName}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Tag Chips */}
+                {selectedUnknowns.length > 0 && (
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-slate-400">SELECTED NAMES:</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedUnknowns([])}
+                        className="text-[10px] font-bold text-rose-400 hover:text-rose-300 underline"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 p-2 bg-slate-950/40 border border-slate-900/60 rounded-xl max-h-24 overflow-y-auto">
+                      {selectedUnknowns.map((name) => (
+                        <span
+                          key={name}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg text-[10.5px] font-mono font-bold"
+                        >
+                          {name}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedUnknowns(selectedUnknowns.filter((n) => n !== name))}
+                            className="hover:text-rose-100 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
                   </div>
-                ))
-              )}
+                )}
+
+                {/* Step 2: Select Correct Player Roster Target */}
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  <label className="text-[10px] font-black text-amber-400 uppercase tracking-wider">
+                    2. Map to Whitelisted Player (Optional):
+                  </label>
+                  <select
+                    value={bulkCorrectionTarget}
+                    onChange={(e) => setBulkCorrectionTarget(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="">-- Choose correct member --</option>
+                    {sortedWhitelistNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Step 3: Action Buttons */}
+                <div className="pt-2 border-t border-slate-900 flex flex-col gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleBulkAssign}
+                    disabled={selectedUnknowns.length === 0 || !bulkCorrectionTarget}
+                    className="w-full py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    MAP SELECTED ({selectedUnknowns.length}) TO {bulkCorrectionTarget || "..."}
+                  </button>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-550 my-1">
+                    <span className="h-px bg-slate-900 flex-1"></span>
+                    <span className="px-2 font-bold uppercase tracking-wider text-slate-500">OR</span>
+                    <span className="h-px bg-slate-900 flex-1"></span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleBulkApprove}
+                    disabled={selectedUnknowns.length === 0}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all flex-shrink-0 flex items-center justify-center gap-1.5"
+                  >
+                    <Users className="w-4 h-4" />
+                    APPROVE & ADD SELECTED AS NEW MEMBERS
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
