@@ -370,6 +370,7 @@ export default function Dashboard() {
   const [chestSearchQuery, setChestSearchQuery] = useState<string[]>([]);
   const [chestSearchPlayerQuery, setChestSearchPlayerQuery] = useState<string[]>([]);
   const [chestSearchDateQuery, setChestSearchDateQuery] = useState<string[]>([]);
+  const [chestSearchSourceQuery, setChestSearchSourceQuery] = useState<string[]>([]);
   const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
   const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
   const [isConnected, setIsConnected] = useState(false);
@@ -1722,7 +1723,8 @@ export default function Dashboard() {
           const matchChest = chestSearchQuery.length === 0 || chestSearchQuery.includes(c.chestName);
           const matchPlayer = chestSearchPlayerQuery.length === 0 || chestSearchPlayerQuery.includes(c.fromPlayer);
           const matchDate = chestSearchDateQuery.length === 0 || chestSearchDateQuery.includes(c.gameDay);
-          return matchChest && matchPlayer && matchDate;
+          const matchSource = chestSearchSourceQuery.length === 0 || (c.source && chestSearchSourceQuery.includes(c.source));
+          return matchChest && matchPlayer && matchDate && matchSource;
         });
 
         // Group by player to see top contributors for this chest
@@ -1738,6 +1740,7 @@ export default function Dashboard() {
         const uniqueChests = Array.from(new Set(chests.map(c => c.chestName))).sort();
         const uniquePlayers = Array.from(new Set(chests.map(c => c.fromPlayer))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         const uniqueDates = Array.from(new Set(chests.map(c => c.gameDay))).sort((a, b) => b.localeCompare(a)); // Sort descending
+        const uniqueSources = Array.from(new Set(chests.map(c => c.source).filter(Boolean) as string[])).sort();
 
         return (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
@@ -1770,14 +1773,20 @@ export default function Dashboard() {
                     onChange={setChestSearchDateQuery}
                     placeholder="Dates"
                   />
+                  <MultiSelectDropdown
+                    options={uniqueSources.map(source => ({ label: source, value: source }))}
+                    selected={chestSearchSourceQuery}
+                    onChange={setChestSearchSourceQuery}
+                    placeholder="Sources"
+                  />
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
-                {chestSearchQuery.length === 0 && chestSearchPlayerQuery.length === 0 && chestSearchDateQuery.length === 0 ? (
+                {chestSearchQuery.length === 0 && chestSearchPlayerQuery.length === 0 && chestSearchDateQuery.length === 0 && chestSearchSourceQuery.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
                     <Search className="w-12 h-12 stroke-[1.5] text-slate-600/70" />
-                    <p className="text-sm font-medium">Select a chest, player, or date to view drops</p>
+                    <p className="text-sm font-medium">Select a chest, player, date, or source to view drops</p>
                   </div>
                 ) : filteredChests.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">

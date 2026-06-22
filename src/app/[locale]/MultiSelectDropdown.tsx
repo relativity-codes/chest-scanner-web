@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Search } from "lucide-react";
 
 export default function MultiSelectDropdown({ 
   options, 
@@ -15,6 +15,7 @@ export default function MultiSelectDropdown({
   placeholder: string 
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,6 +27,12 @@ export default function MultiSelectDropdown({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+    }
+  }, [isOpen]);
 
   const handleToggle = (value: string) => {
     if (selected.includes(value)) {
@@ -41,6 +48,8 @@ export default function MultiSelectDropdown({
       ? options.find(o => o.value === selected[0])?.label || selected[0]
       : `${selected.length} Selected`;
 
+  const filteredOptions = options.filter(o => o.label.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
     <div className="relative flex-1" ref={dropdownRef}>
       <button
@@ -53,11 +62,25 @@ export default function MultiSelectDropdown({
       </button>
       
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1.5 bg-slate-900 border border-slate-800 rounded-xl shadow-xl shadow-black/50 max-h-60 overflow-y-auto overflow-x-hidden p-1.5 scrollbar-thin scrollbar-thumb-slate-700">
-          {options.length === 0 ? (
-            <div className="p-2 text-xs text-slate-500 text-center">No options available</div>
+        <div className="absolute z-50 w-full mt-1.5 bg-slate-900 border border-slate-800 rounded-xl shadow-xl shadow-black/50 max-h-60 overflow-y-auto overflow-x-hidden p-1.5 scrollbar-thin scrollbar-thumb-slate-700 flex flex-col gap-0.5">
+          <div className="sticky top-0 bg-slate-900 pb-1.5 z-10">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500/50"
+              />
+            </div>
+          </div>
+
+          {filteredOptions.length === 0 ? (
+            <div className="p-2 text-xs text-slate-500 text-center">No options found</div>
           ) : (
-            options.map(option => (
+            filteredOptions.map(option => (
               <label key={option.value} className="flex items-center gap-2.5 p-2 hover:bg-slate-800/50 rounded-lg cursor-pointer transition-colors group">
                 <div className="relative flex items-center">
                   <input
