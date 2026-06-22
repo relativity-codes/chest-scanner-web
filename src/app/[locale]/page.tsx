@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { parseChestLevel, calculateChestPoints } from "@/lib/chest-points";
 import TrendsTabContent from "./TrendsTabContent";
@@ -366,7 +365,10 @@ export default function Dashboard() {
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
-  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections" | "trends">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections" | "trends" | "search">("live");
+  const [chestSearchQuery, setChestSearchQuery] = useState("");
+  const [chestSearchPlayerQuery, setChestSearchPlayerQuery] = useState("");
+  const [chestSearchDateQuery, setChestSearchDateQuery] = useState("");
   const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
   const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
   const [isConnected, setIsConnected] = useState(false);
@@ -567,11 +569,11 @@ export default function Dashboard() {
       const isCitadel = fullText.includes("citadel");
       const isEpic = fullText.includes("epic") || fullText.includes("dragon");
       const isRare = fullText.includes("rare") || cn.includes("minotaur") || cn.includes("wyvern");
-      const isCommon = fullText.includes("common") || 
-                       cn.includes("troll") || 
-                       cn.includes("sphinx") || 
-                       cn.includes("gorgon") || 
-                       (fullText.includes("crypt") && !isEpic && !isRare);
+      const isCommon = fullText.includes("common") ||
+        cn.includes("troll") ||
+        cn.includes("sphinx") ||
+        cn.includes("gorgon") ||
+        (fullText.includes("crypt") && !isEpic && !isRare);
 
       const level = parseChestLevel(chest.chestName, chest.source);
 
@@ -1090,7 +1092,7 @@ export default function Dashboard() {
             correctedTo: target,
             createdAt: timestamp,
           }));
-          
+
           let current = [...prev];
           newMappings.forEach((newFix) => {
             current = [...current.filter((f) => f.ocrName !== newFix.ocrName), newFix];
@@ -1152,12 +1154,12 @@ export default function Dashboard() {
       const res = await fetch(`/api/chests?player=${encodeURIComponent(player)}&secretKey=${encodeURIComponent(deleteSecretKeyInput)}`, {
         method: "DELETE",
       });
-      
+
       if (res.ok) {
         // Refresh chests & metadata
         await fetchChests(filterDateRange);
         await fetchInitialMetadata();
-        
+
         // Reset state & close modals
         setShowDeleteConfirm(null);
         setSelectedPlayerDetail(null);
@@ -1538,6 +1540,16 @@ export default function Dashboard() {
           <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
           {t('tabTrends')}
         </button>
+        <button
+          onClick={() => setActiveTab("search")}
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "search"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+        >
+          <Search className="w-3.5 h-3.5 text-amber-500" />
+          Search
+        </button>
       </div>
 
       {/* SECTION CONTENTS */}
@@ -1702,6 +1714,184 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* 2. TAB: CHEST SEARCH */}
+      {activeTab === "search" && (() => {
+        const filteredChests = chests.filter(c => {
+          const matchChest = chestSearchQuery === "" || c.chestName.toLowerCase().includes(chestSearchQuery.toLowerCase());
+          const matchPlayer = chestSearchPlayerQuery === "" || c.fromPlayer.toLowerCase().includes(chestSearchPlayerQuery.toLowerCase());
+          const matchDate = chestSearchDateQuery === "" || c.gameDay.includes(chestSearchDateQuery);
+          return matchChest && matchPlayer && matchDate;
+        });
+        
+        // Group by player to see top contributors for this chest
+        const playerCounts = filteredChests.reduce((acc: Record<string, number>, c) => {
+          acc[c.fromPlayer] = (acc[c.fromPlayer] || 0) + 1;
+          return acc;
+        }, {});
+        
+        const topPlayers = Object.entries(playerCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+
+        // Unique options for selects
+        const uniqueChests = Array.from(new Set(chests.map(c => c.chestName))).sort();
+        const uniquePlayers = Array.from(new Set(chests.map(c => c.fromPlayer))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        const uniqueDates = Array.from(new Set(chests.map(c => c.gameDay))).sort((a, b) => b.localeCompare(a)); // Sort descending
+
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
+            {/* Main Feed Grid */}
+            <div className="lg:col-span-2 flex flex-col h-[500px] sm:h-[650px] glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden">
+              <div className="flex flex-col mb-4 gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Search className="w-4 h-4 text-amber-500" />
+                    <span className="text-sm font-bold tracking-wide text-slate-200">Search Chests</span>
+                  </div>
+                  <span className="text-xs text-slate-400 font-medium">Find specific chest drops</span>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <select
+                    value={chestSearchQuery}
+                    onChange={(e) => setChestSearchQuery(e.target.value)}
+                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="">All Chests</option>
+                    {uniqueChests.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={chestSearchPlayerQuery}
+                    onChange={(e) => setChestSearchPlayerQuery(e.target.value)}
+                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="">All Players</option>
+                    {uniquePlayers.map(player => (
+                      <option key={player} value={player}>{player}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={chestSearchDateQuery}
+                    onChange={(e) => setChestSearchDateQuery(e.target.value)}
+                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
+                  >
+                    <option value="">All Dates</option>
+                    {uniqueDates.map(date => (
+                      <option key={date} value={date}>{date.replace("chests_", "")}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
+                {chestSearchQuery === "" && chestSearchPlayerQuery === "" && chestSearchDateQuery === "" ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                    <Search className="w-12 h-12 stroke-[1.5] text-slate-600/70" />
+                    <p className="text-sm font-medium">Select a chest, player, or date to view drops</p>
+                  </div>
+                ) : filteredChests.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                    <Database className="w-12 h-12 stroke-[1.5] text-slate-600/70" />
+                    <p className="text-sm font-medium">No chests found matching your search</p>
+                  </div>
+                ) : (
+                  filteredChests.slice(0, 100).map((chest, index) => {
+                    const style = getChestColor(chest.chestName);
+                    let borderGlow = "border-slate-800/40";
+                    if (style.type === "legendary") borderGlow = "gold-glow-border";
+                    else if (style.type === "epic") borderGlow = "purple-glow-border";
+                    else if (style.type === "rare") borderGlow = "blue-glow-border";
+                    return (
+                      <div
+                        key={chest.id}
+                        style={{
+                          backgroundColor: style.bg,
+                        }}
+                        className={`border ${borderGlow} p-3.5 sm:p-4 rounded-xl relative transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg flex items-center justify-between gap-4`}
+                      >
+                        {/* Left Block: Icon + Details */}
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="flex-shrink-0">
+                            <ChestIcon type={style.type} className="w-11 h-11" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-sm sm:text-base font-bold tracking-tight font-cinzel ${style.textGlow} truncate`}>
+                                {chest.chestName}
+                              </span>
+                              <span className="text-[9px] uppercase font-bold px-1.5 py-0.25 rounded bg-slate-950/60 border border-slate-850 text-slate-400">
+                                {chest.source}
+                              </span>
+                            </div>
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-[11px] text-slate-400 mt-1">
+                              <div>
+                                <span>{t('claimedBy')}</span>
+                                <span className="font-bold text-slate-200 ml-1">{chest.fromPlayer}</span>
+                              </div>
+                              <span className="hidden sm:inline text-slate-700">•</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Block */}
+                        <div className="flex-shrink-0 flex flex-col items-end gap-1 text-right text-[11px]">
+                          <div className="text-slate-350 font-mono font-medium">
+                            {formatUTC10Time(chest.time)}
+                          </div>
+                          <div className="text-[10px] text-slate-550 font-mono">
+                            {chest.gameDay}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Right Metrics Panel */}
+            <div className="flex flex-col gap-5 lg:gap-6">
+              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col justify-between">
+                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL FOUND</span>
+                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                  <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{filteredChests.length}</span>
+                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests</span>
+                </div>
+              </div>
+
+              {/* Top Contributor list */}
+              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col min-h-[300px]">
+                <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">Top Contributors</h2>
+                <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
+                  {topPlayers.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-slate-500 py-10">
+                      No data available
+                    </div>
+                  ) : (
+                    topPlayers.map(([name, count], rank) => (
+                      <div key={name} className="flex items-center justify-between border-b border-slate-800/40 pb-2">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`w-5 h-5 rounded-md flex items-center justify-center font-bold font-mono text-[10px] ${rank === 0 ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                            rank === 1 ? "bg-slate-400/20 text-slate-300 border border-slate-400/30" :
+                              rank === 2 ? "bg-amber-700/20 text-amber-600 border border-amber-700/30" :
+                                "bg-slate-950 text-slate-400 border border-slate-850"
+                            }`}>
+                            {rank + 1}
+                          </span>
+                          <span className="font-semibold text-slate-200">{name}</span>
+                        </div>
+                        <span className="font-mono font-bold text-amber-500">{count} drops</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 4. TAB: PLAYER CONTRIBUTIONS LEADERBOARD */}
       {activeTab === "contributions" && (() => {
@@ -1909,211 +2099,211 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {sortedContributionsList.map((item, idx) => {
-                        let statusText = t('statusRecruit');
-                        let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
-                        if (item.total >= 30) {
-                          statusText = t('statusEliteRaider');
-                          statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
-                        } else if (item.total >= 15) {
-                          statusText = t('statusHeavyRaider');
-                          statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
-                        } else if (item.total >= 5) {
-                          statusText = t('statusActiveMember');
-                          statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
-                        } else if (item.total > 0) {
-                          statusText = t('statusContributor');
-                          statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
-                        }
+                      let statusText = t('statusRecruit');
+                      let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
+                      if (item.total >= 30) {
+                        statusText = t('statusEliteRaider');
+                        statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
+                      } else if (item.total >= 15) {
+                        statusText = t('statusHeavyRaider');
+                        statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
+                      } else if (item.total >= 5) {
+                        statusText = t('statusActiveMember');
+                        statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
+                      } else if (item.total > 0) {
+                        statusText = t('statusContributor');
+                        statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
+                      }
 
-                        return (
-                          <tr
-                            key={item.player}
-                            className="border-b border-slate-800/40 hover:bg-slate-900/20 transition-all"
-                          >
-                            <td className="py-3 px-4">
-                              {idx === 0 ? (
-                                <span className="text-lg">🥇</span>
-                              ) : idx === 1 ? (
-                                <span className="text-lg">🥈</span>
-                              ) : idx === 2 ? (
-                                <span className="text-lg">🥉</span>
-                              ) : (
-                                <span className="w-5 h-5 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center font-bold text-slate-400 font-mono text-[9px]">
-                                  #{idx + 1}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 font-bold text-slate-200">
-                              <button
-                                onClick={() => setSelectedPlayerDetail(item.player)}
-                                className="hover:text-gold hover:underline transition-all text-left font-bold"
-                              >
-                                {item.player}
-                              </button>
-                            </td>
-                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-purple-400">
-                              {item.epicCrypt.total > 0 ? (
-                                <>
-                                  <span className="cursor-help border-b border-purple-500/25 hover:border-purple-400 transition-all">
-                                    {item.epicCrypt.total}×
-                                  </span>
-                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
-                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-purple-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('epicLevels')}</span>
-                                      {Object.entries(item.epicCrypt.levels)
-                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                        .map(([lvl, count]) => (
-                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-purple-300">{count}</strong></span>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-slate-700">-</span>
-                              )}
-                            </td>
-                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-sky-400">
-                              {item.rareCrypt.total > 0 ? (
-                                <>
-                                  <span className="cursor-help border-b border-sky-500/25 hover:border-sky-400 transition-all">
-                                    {item.rareCrypt.total}×
-                                  </span>
-                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
-                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-sky-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('rareLevels')}</span>
-                                      {Object.entries(item.rareCrypt.levels)
-                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                        .map(([lvl, count]) => (
-                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-sky-300">{count}</strong></span>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-slate-700">-</span>
-                              )}
-                            </td>
-                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-emerald-400">
-                              {item.commonCrypt.total > 0 ? (
-                                <>
-                                  <span className="cursor-help border-b border-emerald-500/25 hover:border-emerald-400 transition-all">
-                                    {item.commonCrypt.total}×
-                                  </span>
-                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
-                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('commonLevels')}</span>
-                                      {Object.entries(item.commonCrypt.levels)
-                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                        .map(([lvl, count]) => (
-                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-emerald-300">{count}</strong></span>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-slate-700">-</span>
-                              )}
-                            </td>
-                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-cyan-400">
-                              {item.citadel.total > 0 ? (
-                                <>
-                                  <span className="cursor-help border-b border-cyan-500/25 hover:border-cyan-400 transition-all">
-                                    {item.citadel.total}×
-                                  </span>
-                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
-                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-cyan-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('citadelLevels')}</span>
-                                      {Object.entries(item.citadel.levels)
-                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                        .map(([lvl, count]) => (
-                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-cyan-300">{count}</strong></span>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-slate-700">-</span>
-                              )}
-                            </td>
-                            <td className="relative group py-3 px-4 text-center font-mono font-bold text-slate-400">
-                              {item.other.total > 0 ? (
-                                <>
-                                  <span className="cursor-help border-b border-slate-500/25 hover:border-slate-400 transition-all">
-                                    {item.other.total}×
-                                  </span>
-                                  <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
-                                    <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
-                                      <span className="font-bold text-[9px] text-slate-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('otherLevels')}</span>
-                                      {Object.entries(item.other.levels)
-                                        .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                        .map(([lvl, count]) => (
-                                          <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-slate-350">{count}</strong></span>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-slate-700">-</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-amber-500 text-sm bg-amber-500/5 font-black">
-                              {item.points.toLocaleString()}
-                            </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm">
-                              {item.total}
-                            </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
-                              {item.ratePerDay.toFixed(1)}
-                            </td>
-                            <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
-                              {item.ratePerWeek.toFixed(1)}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              {item.todayCount >= dailyTarget ? (
-                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                                  Met ✅
-                                </span>
-                              ) : (
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="text-[10px] text-slate-400 font-medium">
-                                    {item.todayCount} / {dailyTarget}
-                                  </span>
-                                  <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
-                                    <div 
-                                      style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }} 
-                                      className="bg-amber-500 h-full rounded-full" 
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              {item.weeklyCount >= weeklyTarget ? (
-                                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                                  {t('metTarget')}
-                                </span>
-                              ) : (
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="text-[10px] text-slate-400 font-medium">
-                                    {item.weeklyCount} / {weeklyTarget}
-                                  </span>
-                                  <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
-                                    <div 
-                                      style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }} 
-                                      className="bg-amber-500 h-full rounded-full" 
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-bold ${statusColor}`}>
-                                {statusText}
+                      return (
+                        <tr
+                          key={item.player}
+                          className="border-b border-slate-800/40 hover:bg-slate-900/20 transition-all"
+                        >
+                          <td className="py-3 px-4">
+                            {idx === 0 ? (
+                              <span className="text-lg">🥇</span>
+                            ) : idx === 1 ? (
+                              <span className="text-lg">🥈</span>
+                            ) : idx === 2 ? (
+                              <span className="text-lg">🥉</span>
+                            ) : (
+                              <span className="w-5 h-5 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center font-bold text-slate-400 font-mono text-[9px]">
+                                #{idx + 1}
                               </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-200">
+                            <button
+                              onClick={() => setSelectedPlayerDetail(item.player)}
+                              className="hover:text-gold hover:underline transition-all text-left font-bold"
+                            >
+                              {item.player}
+                            </button>
+                          </td>
+                          <td className="relative group py-3 px-4 text-center font-mono font-bold text-purple-400">
+                            {item.epicCrypt.total > 0 ? (
+                              <>
+                                <span className="cursor-help border-b border-purple-500/25 hover:border-purple-400 transition-all">
+                                  {item.epicCrypt.total}×
+                                </span>
+                                <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                  <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                    <span className="font-bold text-[9px] text-purple-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('epicLevels')}</span>
+                                    {Object.entries(item.epicCrypt.levels)
+                                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                      .map(([lvl, count]) => (
+                                        <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-purple-300">{count}</strong></span>
+                                      ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-700">-</span>
+                            )}
+                          </td>
+                          <td className="relative group py-3 px-4 text-center font-mono font-bold text-sky-400">
+                            {item.rareCrypt.total > 0 ? (
+                              <>
+                                <span className="cursor-help border-b border-sky-500/25 hover:border-sky-400 transition-all">
+                                  {item.rareCrypt.total}×
+                                </span>
+                                <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                  <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                    <span className="font-bold text-[9px] text-sky-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('rareLevels')}</span>
+                                    {Object.entries(item.rareCrypt.levels)
+                                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                      .map(([lvl, count]) => (
+                                        <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-sky-300">{count}</strong></span>
+                                      ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-700">-</span>
+                            )}
+                          </td>
+                          <td className="relative group py-3 px-4 text-center font-mono font-bold text-emerald-400">
+                            {item.commonCrypt.total > 0 ? (
+                              <>
+                                <span className="cursor-help border-b border-emerald-500/25 hover:border-emerald-400 transition-all">
+                                  {item.commonCrypt.total}×
+                                </span>
+                                <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                  <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                    <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('commonLevels')}</span>
+                                    {Object.entries(item.commonCrypt.levels)
+                                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                      .map(([lvl, count]) => (
+                                        <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-emerald-300">{count}</strong></span>
+                                      ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-700">-</span>
+                            )}
+                          </td>
+                          <td className="relative group py-3 px-4 text-center font-mono font-bold text-cyan-400">
+                            {item.citadel.total > 0 ? (
+                              <>
+                                <span className="cursor-help border-b border-cyan-500/25 hover:border-cyan-400 transition-all">
+                                  {item.citadel.total}×
+                                </span>
+                                <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                  <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                    <span className="font-bold text-[9px] text-cyan-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('citadelLevels')}</span>
+                                    {Object.entries(item.citadel.levels)
+                                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                      .map(([lvl, count]) => (
+                                        <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-cyan-300">{count}</strong></span>
+                                      ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-700">-</span>
+                            )}
+                          </td>
+                          <td className="relative group py-3 px-4 text-center font-mono font-bold text-slate-400">
+                            {item.other.total > 0 ? (
+                              <>
+                                <span className="cursor-help border-b border-slate-500/25 hover:border-slate-400 transition-all">
+                                  {item.other.total}×
+                                </span>
+                                <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block bg-[#0a0c16]/95 border border-slate-800 text-[10px] text-slate-200 px-2.5 py-1.5 rounded-xl shadow-xl backdrop-blur-md pointer-events-none">
+                                  <div className="flex flex-col gap-0.5 font-sans font-normal text-left min-w-[70px]">
+                                    <span className="font-bold text-[9px] text-slate-400 uppercase tracking-wide border-b border-slate-900 pb-0.5 mb-1">{t('otherLevels')}</span>
+                                    {Object.entries(item.other.levels)
+                                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                      .map(([lvl, count]) => (
+                                        <span key={lvl} className="font-mono">Lvl {lvl}: <strong className="text-slate-350">{count}</strong></span>
+                                      ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-700">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-amber-500 text-sm bg-amber-500/5 font-black">
+                            {item.points.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-gold text-sm">
+                            {item.total}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
+                            {item.ratePerDay.toFixed(1)}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-slate-300 text-sm">
+                            {item.ratePerWeek.toFixed(1)}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.todayCount >= dailyTarget ? (
+                              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                Met ✅
+                              </span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {item.todayCount} / {dailyTarget}
+                                </span>
+                                <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
+                                  <div
+                                    style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }}
+                                    className="bg-amber-500 h-full rounded-full"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.weeklyCount >= weeklyTarget ? (
+                              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                                {t('metTarget')}
+                              </span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {item.weeklyCount} / {weeklyTarget}
+                                </span>
+                                <div className="w-16 bg-slate-950 h-1 rounded-full overflow-hidden">
+                                  <div
+                                    style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }}
+                                    className="bg-amber-500 h-full rounded-full"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-bold ${statusColor}`}>
+                              {statusText}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2121,125 +2311,125 @@ export default function Dashboard() {
               {/* Mobile Card List View */}
               <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
                 {sortedContributionsList.map((item, idx) => {
-                    let rankBadge = "";
-                    if (idx === 0) rankBadge = "🥇";
-                    else if (idx === 1) rankBadge = "🥈";
-                    else if (idx === 2) rankBadge = "🥉";
+                  let rankBadge = "";
+                  if (idx === 0) rankBadge = "🥇";
+                  else if (idx === 1) rankBadge = "🥈";
+                  else if (idx === 2) rankBadge = "🥉";
 
-                    let statusText = t('statusRecruit');
-                    let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
-                    if (item.total >= 30) {
-                      statusText = t('statusEliteRaider');
-                      statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
-                    } else if (item.total >= 15) {
-                      statusText = t('statusHeavyRaider');
-                      statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
-                    } else if (item.total >= 5) {
-                      statusText = t('statusActiveMember');
-                      statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
-                    } else if (item.total > 0) {
-                      statusText = t('statusContributor');
-                      statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
-                    }
+                  let statusText = t('statusRecruit');
+                  let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
+                  if (item.total >= 30) {
+                    statusText = t('statusEliteRaider');
+                    statusColor = "text-amber-400 bg-amber-400/5 border-amber-400/10 shadow-sm shadow-amber-400/5";
+                  } else if (item.total >= 15) {
+                    statusText = t('statusHeavyRaider');
+                    statusColor = "text-purple-400 bg-purple-400/5 border-purple-400/10";
+                  } else if (item.total >= 5) {
+                    statusText = t('statusActiveMember');
+                    statusColor = "text-emerald-400 bg-emerald-400/5 border-emerald-400/10";
+                  } else if (item.total > 0) {
+                    statusText = t('statusContributor');
+                    statusColor = "text-sky-400 bg-sky-400/5 border-sky-400/10";
+                  }
 
-                    return (
-                      <div key={item.player} className="p-3 sm:p-4 bg-slate-950/45 border border-slate-900 rounded-xl sm:rounded-2xl space-y-2.5 sm:space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-slate-400 font-bold w-5 text-xs sm:text-sm">
-                              {rankBadge || `#${idx + 1}`}
-                            </span>
-                            <button
-                              onClick={() => setSelectedPlayerDetail(item.player)}
-                              className="font-bold text-slate-200 hover:text-gold hover:underline text-xs sm:text-sm text-left"
-                            >
-                              {item.player}
-                            </button>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded-full border text-[9px] sm:text-[10px] font-bold ${statusColor}`}>
-                            {statusText}
+                  return (
+                    <div key={item.player} className="p-3 sm:p-4 bg-slate-950/45 border border-slate-900 rounded-xl sm:rounded-2xl space-y-2.5 sm:space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-slate-400 font-bold w-5 text-xs sm:text-sm">
+                            {rankBadge || `#${idx + 1}`}
                           </span>
+                          <button
+                            onClick={() => setSelectedPlayerDetail(item.player)}
+                            className="font-bold text-slate-200 hover:text-gold hover:underline text-xs sm:text-sm text-left"
+                          >
+                            {item.player}
+                          </button>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full border text-[9px] sm:text-[10px] font-bold ${statusColor}`}>
+                          {statusText}
+                        </span>
+                      </div>
+
+                      {/* Stats grid */}
+                      <div className="grid grid-cols-3 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('epicMobile')}</span>
+                          <span className="font-mono font-bold text-purple-400">{item.epicCrypt.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('rareMobile')}</span>
+                          <span className="font-mono font-bold text-sky-400">{item.rareCrypt.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('commonMobile')}</span>
+                          <span className="font-mono font-bold text-emerald-400">{item.commonCrypt.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('citadelMobile')}</span>
+                          <span className="font-mono font-bold text-cyan-400">{item.citadel.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('otherMobile')}</span>
+                          <span className="font-mono font-bold text-slate-500">{item.other.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('totalMobile')}</span>
+                          <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('wealthMobile')}</span>
+                          <span className="font-mono font-bold text-amber-500 text-xs">{item.points.toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerDayMobile')}</span>
+                          <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerDay.toFixed(1)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerWeekMobile')}</span>
+                          <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerWeek.toFixed(1)}</span>
+                        </div>
+                      </div>
+
+                      {/* Progress Bars (Compact Side-by-Side) */}
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-900/40 text-[9px] sm:text-[10px]">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">{t('dailyLabel', { target: dailyTarget })}</span>
+                            {item.todayCount >= dailyTarget ? (
+                              <span className="font-bold text-emerald-400">Met ✅</span>
+                            ) : (
+                              <span className="text-slate-350 font-semibold">{item.todayCount}/{dailyTarget}</span>
+                            )}
+                          </div>
+                          <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }}
+                              className="bg-amber-500 h-full rounded-full"
+                            />
+                          </div>
                         </div>
 
-                        {/* Stats grid */}
-                        <div className="grid grid-cols-3 gap-y-2 gap-x-1 sm:gap-2 text-center text-[9px] sm:text-[10px] bg-slate-900/30 p-2 rounded-lg sm:rounded-xl border border-slate-900/50">
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('epicMobile')}</span>
-                            <span className="font-mono font-bold text-purple-400">{item.epicCrypt.total}</span>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">{t('weeklyLabel', { target: weeklyTarget })}</span>
+                            {item.weeklyCount >= weeklyTarget ? (
+                              <span className="font-bold text-emerald-400">Met ✅</span>
+                            ) : (
+                              <span className="text-slate-350 font-semibold">{item.weeklyCount}/{weeklyTarget}</span>
+                            )}
                           </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('rareMobile')}</span>
-                            <span className="font-mono font-bold text-sky-400">{item.rareCrypt.total}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('commonMobile')}</span>
-                            <span className="font-mono font-bold text-emerald-400">{item.commonCrypt.total}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('citadelMobile')}</span>
-                            <span className="font-mono font-bold text-cyan-400">{item.citadel.total}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('otherMobile')}</span>
-                            <span className="font-mono font-bold text-slate-500">{item.other.total}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('totalMobile')}</span>
-                            <span className="font-mono font-bold text-gold text-xs">{item.total}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('wealthMobile')}</span>
-                            <span className="font-mono font-bold text-amber-500 text-xs">{item.points.toLocaleString()}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerDayMobile')}</span>
-                            <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerDay.toFixed(1)}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500 block mb-0.5 text-[8.5px] sm:text-[9px] uppercase tracking-tighter">{t('ratePerWeekMobile')}</span>
-                            <span className="font-mono font-bold text-slate-300 text-xs">{item.ratePerWeek.toFixed(1)}</span>
-                          </div>
-                        </div>
-
-                        {/* Progress Bars (Compact Side-by-Side) */}
-                        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-900/40 text-[9px] sm:text-[10px]">
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-medium">{t('dailyLabel', { target: dailyTarget })}</span>
-                              {item.todayCount >= dailyTarget ? (
-                                <span className="font-bold text-emerald-400">Met ✅</span>
-                              ) : (
-                                <span className="text-slate-350 font-semibold">{item.todayCount}/{dailyTarget}</span>
-                              )}
-                            </div>
-                            <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
-                              <div
-                                style={{ width: `${Math.min(100, Math.round((item.todayCount / dailyTarget) * 100))}%` }}
-                                className="bg-amber-500 h-full rounded-full"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-medium">{t('weeklyLabel', { target: weeklyTarget })}</span>
-                              {item.weeklyCount >= weeklyTarget ? (
-                                <span className="font-bold text-emerald-400">Met ✅</span>
-                              ) : (
-                                <span className="text-slate-350 font-semibold">{item.weeklyCount}/{weeklyTarget}</span>
-                              )}
-                            </div>
-                            <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
-                              <div
-                                style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }}
-                                className="bg-amber-500 h-full rounded-full"
-                              />
-                            </div>
+                          <div className="w-full bg-slate-900 h-1 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${Math.min(100, Math.round((item.weeklyCount / weeklyTarget) * 100))}%` }}
+                              className="bg-amber-500 h-full rounded-full"
+                            />
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -2591,7 +2781,7 @@ export default function Dashboard() {
                   <label className="text-[10px] font-black text-rose-400 uppercase tracking-wider">
                     {t('step1Label', { count: unknownPlayers.length })}:
                   </label>
-                  
+
                   <button
                     type="button"
                     onClick={() => setUnknownsDropdownOpen(!unknownsDropdownOpen)}
@@ -2822,7 +3012,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-      
+
       {activeTab === "trends" && (
         <TrendsTabContent players={players} />
       )}
@@ -2845,7 +3035,7 @@ export default function Dashboard() {
           ratePerWeek: 0
         };
         const playerChests = chests.filter(c => c.fromPlayer === selectedPlayerDetail).slice(0, 10);
-        
+
         // Group scans by source for the mini-chart
         const sourceCounts: Record<string, number> = {};
         chests.filter(c => c.fromPlayer === selectedPlayerDetail).forEach(c => {
@@ -2872,7 +3062,7 @@ export default function Dashboard() {
         return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in">
             <div className="glass-panel max-w-lg w-full rounded-xl sm:rounded-2xl p-4 sm:p-6 relative border-amber-500/20 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-              <button 
+              <button
                 onClick={() => setSelectedPlayerDetail(null)}
                 className="absolute top-3 right-3 sm:top-4 sm:right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-all"
               >
@@ -3123,7 +3313,7 @@ export default function Dashboard() {
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60] animate-fade-in">
           <div className="glass-panel max-w-md w-full rounded-xl sm:rounded-2xl p-4 sm:p-6 border-red-500/20 shadow-lg shadow-red-500/5 relative">
-            <button 
+            <button
               onClick={() => {
                 setShowDeleteConfirm(null);
                 setDeleteSecretKeyInput("");
