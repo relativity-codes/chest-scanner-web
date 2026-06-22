@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Info
 } from "lucide-react";
+import MultiSelectDropdown from "./MultiSelectDropdown";
 
 interface DailyStat {
   date: string;
@@ -97,7 +98,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
   const [groupBy, setGroupBy] = useState<"day" | "week">("day");
   const [timeframe, setTimeframe] = useState<string>("all");
   const [graphType, setGraphType] = useState<"daily" | "cumulative">("daily");
-  const [selectedPlayer, setSelectedPlayer] = useState<string>("all"); // default to all
+  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]); // empty means all
   
   // Interactive hover state
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -109,8 +110,9 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
     setIsError(false);
     try {
       let url = "/api/stats/daily";
-      if (selectedPlayer && selectedPlayer !== "all") {
-        url += `?player=${encodeURIComponent(selectedPlayer)}`;
+      if (selectedPlayers.length > 0) {
+        const query = selectedPlayers.map(p => `player=${encodeURIComponent(p)}`).join('&');
+        url += `?${query}`;
       }
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch daily statistics");
@@ -122,7 +124,7 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedPlayer]);
+  }, [selectedPlayers]);
 
   useEffect(() => {
     fetchStats();
@@ -442,20 +444,13 @@ export default function TrendsTabContent({ players = [] }: TrendsTabProps) {
           <div className="flex flex-wrap items-center gap-2">
             {/* Player Selector Dropdown */}
             {players.length > 0 && (
-              <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-900 text-[10px] font-bold h-[34px] min-w-[120px]">
-                <span className="text-slate-500 uppercase tracking-wider text-[8px]">{t('playerLabel')}</span>
-                <select
-                  value={selectedPlayer}
-                  onChange={(e) => setSelectedPlayer(e.target.value)}
-                  className="bg-transparent text-slate-200 border-none outline-none focus:ring-0 cursor-pointer text-[10px] font-bold py-0.5 pl-0.5 pr-2 focus:text-amber-400 select-custom"
-                >
-                  <option value="all" className="bg-[#05060b] text-slate-400 font-bold">{t('allMembers')}</option>
-                  {players.map((p) => (
-                    <option key={p} value={p} className="bg-[#05060b] text-slate-200 font-bold">
-                      {p}
-                    </option>
-                  ))}
-                </select>
+              <div className="w-[200px]">
+                <MultiSelectDropdown
+                  options={players.map(p => ({ label: p, value: p }))}
+                  selected={selectedPlayers}
+                  onChange={setSelectedPlayers}
+                  placeholder="Players"
+                />
               </div>
             )}
 

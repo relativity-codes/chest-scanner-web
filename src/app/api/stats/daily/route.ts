@@ -12,17 +12,17 @@ function getUTC10DateOnly(date: Date | string): Date {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const player = searchParams.get("player");
+    const players = searchParams.getAll("player").filter(Boolean);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {};
-    if (player) {
-      // Find all OCR name variants that map to this corrected/canonical name
+    if (players.length > 0) {
+      // Find all OCR name variants that map to these corrected/canonical names
       const corrections = await db.playerFix.findMany({
-        where: { correctedTo: player },
+        where: { correctedTo: { in: players } },
         select: { ocrName: true }
       });
-      const namesToQuery = [player, ...corrections.map((c) => c.ocrName)];
+      const namesToQuery = [...players, ...corrections.map((c) => c.ocrName)];
       
       where.fromPlayer = { in: namesToQuery };
     }

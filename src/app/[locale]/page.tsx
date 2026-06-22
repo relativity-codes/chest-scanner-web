@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { parseChestLevel, calculateChestPoints } from "@/lib/chest-points";
 import TrendsTabContent from "./TrendsTabContent";
 import PlayerMiniTrend from "./PlayerMiniTrend";
+import MultiSelectDropdown from "./MultiSelectDropdown";
 import {
   Activity,
   Users,
@@ -366,9 +367,9 @@ export default function Dashboard() {
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
   const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections" | "trends" | "search">("live");
-  const [chestSearchQuery, setChestSearchQuery] = useState("");
-  const [chestSearchPlayerQuery, setChestSearchPlayerQuery] = useState("");
-  const [chestSearchDateQuery, setChestSearchDateQuery] = useState("");
+  const [chestSearchQuery, setChestSearchQuery] = useState<string[]>([]);
+  const [chestSearchPlayerQuery, setChestSearchPlayerQuery] = useState<string[]>([]);
+  const [chestSearchDateQuery, setChestSearchDateQuery] = useState<string[]>([]);
   const [weeklySortField, setWeeklySortField] = useState<WeeklySortField>("total");
   const [weeklySortDirection, setWeeklySortDirection] = useState<SortDirection>("desc");
   const [isConnected, setIsConnected] = useState(false);
@@ -1718,21 +1719,20 @@ export default function Dashboard() {
       {/* 2. TAB: CHEST SEARCH */}
       {activeTab === "search" && (() => {
         const filteredChests = chests.filter(c => {
-          const matchChest = chestSearchQuery === "" || c.chestName.toLowerCase().includes(chestSearchQuery.toLowerCase());
-          const matchPlayer = chestSearchPlayerQuery === "" || c.fromPlayer.toLowerCase().includes(chestSearchPlayerQuery.toLowerCase());
-          const matchDate = chestSearchDateQuery === "" || c.gameDay.includes(chestSearchDateQuery);
+          const matchChest = chestSearchQuery.length === 0 || chestSearchQuery.includes(c.chestName);
+          const matchPlayer = chestSearchPlayerQuery.length === 0 || chestSearchPlayerQuery.includes(c.fromPlayer);
+          const matchDate = chestSearchDateQuery.length === 0 || chestSearchDateQuery.includes(c.gameDay);
           return matchChest && matchPlayer && matchDate;
         });
-        
+
         // Group by player to see top contributors for this chest
         const playerCounts = filteredChests.reduce((acc: Record<string, number>, c) => {
           acc[c.fromPlayer] = (acc[c.fromPlayer] || 0) + 1;
           return acc;
         }, {});
-        
+
         const topPlayers = Object.entries(playerCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 10);
+          .sort((a, b) => b[1] - a[1]);
 
         // Unique options for selects
         const uniqueChests = Array.from(new Set(chests.map(c => c.chestName))).sort();
@@ -1752,41 +1752,29 @@ export default function Dashboard() {
                   <span className="text-xs text-slate-400 font-medium">Find specific chest drops</span>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <select
-                    value={chestSearchQuery}
-                    onChange={(e) => setChestSearchQuery(e.target.value)}
-                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
-                  >
-                    <option value="">All Chests</option>
-                    {uniqueChests.map(name => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={chestSearchPlayerQuery}
-                    onChange={(e) => setChestSearchPlayerQuery(e.target.value)}
-                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
-                  >
-                    <option value="">All Players</option>
-                    {uniquePlayers.map(player => (
-                      <option key={player} value={player}>{player}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={chestSearchDateQuery}
-                    onChange={(e) => setChestSearchDateQuery(e.target.value)}
-                    className="flex-1 px-4 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
-                  >
-                    <option value="">All Dates</option>
-                    {uniqueDates.map(date => (
-                      <option key={date} value={date}>{date.replace("chests_", "")}</option>
-                    ))}
-                  </select>
+                  <MultiSelectDropdown
+                    options={uniqueChests.map(name => ({ label: name, value: name }))}
+                    selected={chestSearchQuery}
+                    onChange={setChestSearchQuery}
+                    placeholder="Chests"
+                  />
+                  <MultiSelectDropdown
+                    options={uniquePlayers.map(player => ({ label: player, value: player }))}
+                    selected={chestSearchPlayerQuery}
+                    onChange={setChestSearchPlayerQuery}
+                    placeholder="Players"
+                  />
+                  <MultiSelectDropdown
+                    options={uniqueDates.map(date => ({ label: date.replace("chests_", ""), value: date }))}
+                    selected={chestSearchDateQuery}
+                    onChange={setChestSearchDateQuery}
+                    placeholder="Dates"
+                  />
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
-                {chestSearchQuery === "" && chestSearchPlayerQuery === "" && chestSearchDateQuery === "" ? (
+                {chestSearchQuery.length === 0 && chestSearchPlayerQuery.length === 0 && chestSearchDateQuery.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
                     <Search className="w-12 h-12 stroke-[1.5] text-slate-600/70" />
                     <p className="text-sm font-medium">Select a chest, player, or date to view drops</p>
@@ -1852,17 +1840,26 @@ export default function Dashboard() {
             </div>
 
             {/* Right Metrics Panel */}
-            <div className="flex flex-col gap-5 lg:gap-6">
-              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col justify-between">
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL FOUND</span>
-                <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-                  <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{filteredChests.length}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests</span>
+            <div className="flex flex-col gap-5 lg:gap-6 h-[500px] sm:h-[650px]">
+              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex gap-4 shrink-0 divide-x divide-slate-800">
+                <div className="flex flex-col flex-1">
+                  <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">TOTAL FOUND</span>
+                  <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                    <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{filteredChests.length}</span>
+                    <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">chests</span>
+                  </div>
+                </div>
+                <div className="flex flex-col flex-1 pl-4">
+                  <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider">CONTRIBUTORS</span>
+                  <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
+                    <span className="text-lg sm:text-2xl md:text-3xl font-black text-slate-100">{topPlayers.length}</span>
+                    <span className="text-[10px] sm:text-xs text-amber-500 font-semibold">players</span>
+                  </div>
                 </div>
               </div>
 
               {/* Top Contributor list */}
-              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col min-h-[300px]">
+              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col flex-1">
                 <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">Top Contributors</h2>
                 <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
                   {topPlayers.length === 0 ? (
