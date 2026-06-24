@@ -1332,7 +1332,7 @@ export default function Dashboard() {
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
           {/* WhatsApp Invite link */}
-          <a
+          {/* <a
             href="https://chat.whatsapp.com/D7E8YCtYPOjB2j1vN4ZVDN"
             target="_blank"
             rel="noopener noreferrer"
@@ -1340,10 +1340,10 @@ export default function Dashboard() {
           >
             <MessageCircle className="w-4 h-4" />
             <span>WhatsApp Group</span>
-          </a>
+          </a> */}
 
           {/* Discord Invite link */}
-          <a
+          {/* <a
             href="https://discord.gg/7994zN5X"
             target="_blank"
             rel="noopener noreferrer"
@@ -1351,7 +1351,7 @@ export default function Dashboard() {
           >
             <MessageSquare className="w-4 h-4" />
             <span>Discord</span>
-          </a>
+          </a> */}
 
           {/* Audio toggle button */}
           <button
