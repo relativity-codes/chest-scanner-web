@@ -1736,6 +1736,17 @@ export default function Dashboard() {
         const topPlayers = Object.entries(playerCounts)
           .sort((a, b) => b[1] - a[1]);
 
+        const hasActiveSearch =
+          chestSearchQuery.length > 0 ||
+          chestSearchPlayerQuery.length > 0 ||
+          chestSearchDateQuery.length > 0 ||
+          chestSearchSourceQuery.length > 0;
+
+        const contributorsInResults = new Set(Object.keys(playerCounts));
+        const missingWhitelistPlayers = sortedWhitelistNames.filter(
+          (name) => !contributorsInResults.has(name)
+        );
+
         // Unique options for selects
         const uniqueChests = Array.from(new Set(chests.map(c => c.chestName))).sort();
         const uniquePlayers = Array.from(new Set(chests.map(c => c.fromPlayer))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -1868,9 +1879,9 @@ export default function Dashboard() {
               </div>
 
               {/* Top Contributor list */}
-              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col flex-1">
+              <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col flex-1 min-h-0">
                 <h2 className="text-sm font-bold tracking-wider text-slate-300 mb-3 uppercase">Top Contributors</h2>
-                <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs">
+                <div className="overflow-y-auto pr-1 flex flex-col gap-2.5 text-xs flex-1 min-h-0">
                   {topPlayers.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-slate-500 py-10">
                       No data available
@@ -1894,6 +1905,34 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
+
+              {/* Whitelisted players absent from search results */}
+              {hasActiveSearch && (
+                <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 overflow-hidden flex flex-col flex-1 min-h-0">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-sm font-bold tracking-wider text-slate-300 uppercase">Missing from Results</h2>
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      {missingWhitelistPlayers.length} whitelisted
+                    </span>
+                  </div>
+                  <div className="overflow-y-auto pr-1 flex flex-col gap-2 text-xs flex-1 min-h-0">
+                    {missingWhitelistPlayers.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-slate-500 py-6 text-center">
+                        All whitelisted members appear in these results
+                      </div>
+                    ) : (
+                      missingWhitelistPlayers.map((name) => (
+                        <div key={name} className="flex items-center gap-2.5 border-b border-slate-800/40 pb-2">
+                          <span className="w-5 h-5 rounded-md flex items-center justify-center bg-slate-950 text-slate-500 border border-slate-850">
+                            <Users className="w-3 h-3" />
+                          </span>
+                          <span className="font-semibold text-slate-400">{name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
