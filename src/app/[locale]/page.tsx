@@ -366,7 +366,7 @@ export default function Dashboard() {
   const [fixes, setFixes] = useState<PlayerFix[]>([]);
   const [unknownPlayers, setUnknownPlayers] = useState<UnknownPlayer[]>([]);
 
-  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "weekly" | "whitelist" | "corrections" | "trends" | "search">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "contributions" | "contributionsWhitelist" | "weekly" | "weeklyWhitelist" | "whitelist" | "corrections" | "trends" | "search">("live");
   const [chestSearchQuery, setChestSearchQuery] = useState<string[]>([]);
   const [chestSearchPlayerQuery, setChestSearchPlayerQuery] = useState<string[]>([]);
   const [chestSearchDateQuery, setChestSearchDateQuery] = useState<string[]>([]);
@@ -733,7 +733,17 @@ export default function Dashboard() {
       });
   }, [weeklyContributionsList, playerSearchQuery, weeklySortField, weeklySortDirection]);
 
-  const handleExportWeeklyCSV = (list: WeeklyPlayerContribution[]) => {
+  const whitelistPlayerSet = useMemo(() => new Set(players), [players]);
+
+  const sortedWhitelistContributionsList = useMemo(() => {
+    return sortedContributionsList.filter((item) => whitelistPlayerSet.has(item.player));
+  }, [sortedContributionsList, whitelistPlayerSet]);
+
+  const sortedWhitelistWeeklyContributionsList = useMemo(() => {
+    return sortedWeeklyContributionsList.filter((item) => whitelistPlayerSet.has(item.player));
+  }, [sortedWeeklyContributionsList, whitelistPlayerSet]);
+
+  const handleExportWeeklyCSV = (list: WeeklyPlayerContribution[], filenameSuffix = "") => {
     const headers = [
       "Rank",
       "Player Name",
@@ -755,13 +765,13 @@ export default function Dashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `${clanName.toLowerCase()}_weekly_contributions_last_5_weeks.csv`);
+    link.setAttribute("download", `${clanName.toLowerCase()}_weekly_contributions_last_5_weeks${filenameSuffix}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleExportCSV = (contributionsList: PlayerContribution[]) => {
+  const handleExportCSV = (contributionsList: PlayerContribution[], filenameSuffix = "") => {
     const headers = [
       "Rank", "Player Name", "Epic Crypt", "Rare Crypt", "Common Crypt", "Citadel", "Other",
       "Total Drops", "Clan Wealth", "Rate/Day", "Rate/Week", `Daily Target (${dailyTarget}) Status`, `Weekly Target (${weeklyTarget}) Status`
@@ -791,7 +801,7 @@ export default function Dashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `${clanName.toLowerCase()}_clan_chest_contributions_${filterDateRange}_${filterSource}.csv`);
+    link.setAttribute("download", `${clanName.toLowerCase()}_clan_chest_contributions_${filterDateRange}_${filterSource}${filenameSuffix}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1498,6 +1508,16 @@ export default function Dashboard() {
           {t('tabContributions')}
         </button>
         <button
+          onClick={() => setActiveTab("contributionsWhitelist")}
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "contributionsWhitelist"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+        >
+          <Users className="w-3.5 h-3.5 text-emerald-400" />
+          {t('tabContributionsWhitelist')}
+        </button>
+        <button
           onClick={() => setActiveTab("weekly")}
           className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "weekly"
             ? "border-amber-500 text-gold font-bold"
@@ -1506,6 +1526,16 @@ export default function Dashboard() {
         >
           <BarChart3 className="w-3.5 h-3.5" />
           {t('tabWeekly')}
+        </button>
+        <button
+          onClick={() => setActiveTab("weeklyWhitelist")}
+          className={`pb-2.5 sm:pb-3 px-3 sm:px-4 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 flex-shrink-0 snap-start flex items-center gap-1.5 ${activeTab === "weeklyWhitelist"
+            ? "border-amber-500 text-gold font-bold"
+            : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+        >
+          <Users className="w-3.5 h-3.5 text-emerald-400" />
+          {t('tabWeeklyWhitelist')}
         </button>
         <button
           onClick={() => setActiveTab("whitelist")}
@@ -1939,12 +1969,19 @@ export default function Dashboard() {
       })()}
 
       {/* 4. TAB: PLAYER CONTRIBUTIONS LEADERBOARD */}
-      {activeTab === "contributions" && (() => {
-        const topByPoints = [...contributionsList].sort((a, b) => b.points - a.points || b.total - a.total)[0];
+      {(activeTab === "contributions" || activeTab === "contributionsWhitelist") && (() => {
+        const isWhitelistOnly = activeTab === "contributionsWhitelist";
+        const displayContributionsList = isWhitelistOnly ? sortedWhitelistContributionsList : sortedContributionsList;
+        const statsContributionsList = isWhitelistOnly
+          ? displayContributionsList
+          : contributionsList;
+        const exportSuffix = isWhitelistOnly ? "_whitelist" : "";
+        const topByPoints = [...displayContributionsList].sort((a, b) => b.points - a.points || b.total - a.total)[0];
         const topContributor = topByPoints?.player || "None";
         const topContributorPoints = topByPoints?.points || 0;
-        const totalScanChests = chests.length;
-        const averageChestsPerPlayer = players.length > 0 ? (totalScanChests / players.length).toFixed(1) : "0.0";
+        const totalScanChests = statsContributionsList.reduce((sum, c) => sum + c.total, 0);
+        const rosterSize = isWhitelistOnly ? players.length : statsContributionsList.length;
+        const averageChestsPerPlayer = rosterSize > 0 ? (totalScanChests / rosterSize).toFixed(1) : "0.0";
 
         return (
           <div className="flex flex-col gap-5 lg:gap-6">
@@ -1978,9 +2015,9 @@ export default function Dashboard() {
                 <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('activeContributionRate')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">
-                    {contributionsList.filter(c => c.total > 0).length}
+                    {statsContributionsList.filter(c => c.total > 0).length}
                   </span>
-                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} {t('activeOf', { count: '' }).replace('/ ', '').replace('  ', '').trim()}</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400">/ {rosterSize} {t('activeOf', { count: '' }).replace('/ ', '').replace('  ', '').trim()}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
@@ -1992,8 +2029,12 @@ export default function Dashboard() {
             {/* Leaderboard Grid */}
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
               <div className="flex flex-col gap-1.5 mb-3.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">{t('leaderboardTitle', { clanName })}</h2>
-                <p className="text-[11px] sm:text-xs text-slate-400">{t('leaderboardSubtitle')}</p>
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">
+                  {isWhitelistOnly ? t('leaderboardTitleWhitelist', { clanName }) : t('leaderboardTitle', { clanName })}
+                </h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">
+                  {isWhitelistOnly ? t('leaderboardSubtitleWhitelist') : t('leaderboardSubtitle')}
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
@@ -2089,7 +2130,7 @@ export default function Dashboard() {
                   </div>
 
                   <button
-                    onClick={() => handleExportCSV(sortedContributionsList)}
+                    onClick={() => handleExportCSV(displayContributionsList, exportSuffix)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
                   >
                     <Download className="w-4 h-4" />
@@ -2143,7 +2184,7 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedContributionsList.map((item, idx) => {
+                    {displayContributionsList.map((item, idx) => {
                       let statusText = t('statusRecruit');
                       let statusColor = "text-slate-500 bg-slate-500/5 border-slate-500/10";
                       if (item.total >= 30) {
@@ -2355,7 +2396,7 @@ export default function Dashboard() {
 
               {/* Mobile Card List View */}
               <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
-                {sortedContributionsList.map((item, idx) => {
+                {displayContributionsList.map((item, idx) => {
                   let rankBadge = "";
                   if (idx === 0) rankBadge = "🥇";
                   else if (idx === 1) rankBadge = "🥈";
@@ -2482,10 +2523,14 @@ export default function Dashboard() {
       })()}
 
       {/* TAB: WEEKLY CONTRIBUTIONS (LAST 5 WEEKS) */}
-      {activeTab === "weekly" && (() => {
-        const topThisWeek = [...weeklyContributionsList].sort((a, b) => b.weeks[0] - a.weeks[0])[0];
-        const clanWeeklyTotal = weeklyContributionsList.reduce((sum, p) => sum + p.total, 0);
-        const metTargetThisWeek = weeklyContributionsList.filter((p) => p.weeks[0] >= weeklyTarget).length;
+      {(activeTab === "weekly" || activeTab === "weeklyWhitelist") && (() => {
+        const isWhitelistOnly = activeTab === "weeklyWhitelist";
+        const displayWeeklyList = isWhitelistOnly ? sortedWhitelistWeeklyContributionsList : sortedWeeklyContributionsList;
+        const exportSuffix = isWhitelistOnly ? "_whitelist" : "";
+        const topThisWeek = [...displayWeeklyList].sort((a, b) => b.weeks[0] - a.weeks[0])[0];
+        const clanWeeklyTotal = displayWeeklyList.reduce((sum, p) => sum + p.total, 0);
+        const metTargetThisWeek = displayWeeklyList.filter((p) => p.weeks[0] >= weeklyTarget).length;
+        const rosterSize = isWhitelistOnly ? players.length : displayWeeklyList.length;
 
         const weeklySortableTh = (field: WeeklySortField, className: string, children: React.ReactNode) => {
           const isActive = weeklySortField === field;
@@ -2540,7 +2585,7 @@ export default function Dashboard() {
                 <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-wider uppercase">{t('weeklyTargetMetCard')}</span>
                 <div className="flex items-baseline gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                   <span className="text-base sm:text-2xl md:text-3xl font-black text-slate-100">{metTargetThisWeek}</span>
-                  <span className="text-[10px] sm:text-xs text-slate-400">/ {players.length} ({weeklyTarget}/wk)</span>
+                  <span className="text-[10px] sm:text-xs text-slate-400">/ {rosterSize} ({weeklyTarget}/wk)</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2.5 sm:mt-3 text-[9px] sm:text-[10px] text-slate-400">
                   <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
@@ -2551,8 +2596,12 @@ export default function Dashboard() {
 
             <div className="glass-panel rounded-xl sm:rounded-2xl p-3.5 sm:p-5 flex flex-col min-h-[450px]">
               <div className="flex flex-col gap-1.5 mb-3.5">
-                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">{t('weeklyLeaderboard', { clanName })}</h2>
-                <p className="text-[11px] sm:text-xs text-slate-400">{t('weeklySubtitle')}</p>
+                <h2 className="text-sm sm:text-base font-bold text-slate-200 uppercase tracking-wide">
+                  {isWhitelistOnly ? t('weeklyLeaderboardWhitelist', { clanName }) : t('weeklyLeaderboard', { clanName })}
+                </h2>
+                <p className="text-[11px] sm:text-xs text-slate-400">
+                  {isWhitelistOnly ? t('weeklySubtitleWhitelist') : t('weeklySubtitle')}
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-3 sm:gap-4 items-center justify-between mb-4 sm:mb-5 bg-slate-950/40 p-3 sm:p-4 border border-slate-900 rounded-xl sm:rounded-2xl">
@@ -2579,7 +2628,7 @@ export default function Dashboard() {
 
                 <div className="flex gap-2 items-center w-full md:w-auto">
                   <button
-                    onClick={() => handleExportWeeklyCSV(sortedWeeklyContributionsList)}
+                    onClick={() => handleExportWeeklyCSV(displayWeeklyList, exportSuffix)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/35 hover:border-emerald-500/50 text-emerald-400 font-bold rounded-xl text-xs transition-all w-full md:w-auto justify-center"
                   >
                     <Download className="w-4 h-4" />
@@ -2619,7 +2668,7 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedWeeklyContributionsList.map((item, idx) => (
+                    {displayWeeklyList.map((item, idx) => (
                       <tr key={item.player} className="border-b border-slate-800/40 hover:bg-slate-900/20 transition-all">
                         <td className="py-3 px-4">
                           {idx === 0 ? (
@@ -2671,7 +2720,7 @@ export default function Dashboard() {
               </div>
 
               <div className="block md:hidden flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
-                {sortedWeeklyContributionsList.map((item, idx) => {
+                {displayWeeklyList.map((item, idx) => {
                   let rankBadge = "";
                   if (idx === 0) rankBadge = "🥇";
                   else if (idx === 1) rankBadge = "🥈";
